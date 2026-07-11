@@ -35,22 +35,14 @@
 
     <section>
       <h2>Cookie prompts</h2>
-      <p class="hint">How BetterBlock handles cookie-consent banners. It will
-        never accept cookies on your behalf.</p>
-      <div class="field radio-group">
-        <label class="row"><input type="radio" name="cookie-mode" value="reject">
-          <span><strong>Reject &amp; hide</strong>
-          <span class="hint">Click "reject all / only necessary" when the banner has one
-          (found via known selectors, multilingual matching, or the on-device AI reading
-          the button labels). If there's no reject button, open the banner's preferences
-          screen, opt out of every optional toggle, and save — the absolute minimum
-          consent. As a last resort, hide the banner and unlock scrolling.</span></span></label>
-        <label class="row"><input type="radio" name="cookie-mode" value="hide">
-          <span><strong>Just hide</strong>
-          <span class="hint">Never click anything — hide the banner and unlock scrolling.</span></span></label>
-        <label class="row"><input type="radio" name="cookie-mode" value="off">
-          <span><strong>Off</strong>
-          <span class="hint">Leave cookie prompts alone.</span></span></label>
+      <div class="field row">
+        <label for="hide-cookies" class="grow">
+          Hide cookie-consent banners
+          <span class="hint">Hides the banner, removes scroll locks and backdrop overlays.
+          BetterBlock never clicks anything in a consent dialog — no consent is
+          ever given or refused on your behalf.</span>
+        </label>
+        <input type="checkbox" id="hide-cookies">
       </div>
     </section>
 

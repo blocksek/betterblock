@@ -21,9 +21,9 @@ const DEFAULT_SETTINGS = {
   threshold: 0.7,
   // Allow AI verdicts to create network-level block rules for ad iframe hosts.
   learnNetworkRules: true,
-  // Cookie prompts: 'reject' = click reject-all (hide as fallback),
-  // 'hide' = just hide the banner, 'off' = leave them alone.
-  cookieMode: 'reject',
+  // Cookie prompts: 'hide' = hide banners (and unlock scrolling),
+  // 'off' = leave them alone. (Legacy stored 'reject' is treated as 'hide'.)
+  cookieMode: 'hide',
   allowlist: [], // hostnames where BetterBlock is off
 };
 
@@ -329,7 +329,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       };
     },
     'classify': () => handleClassify(msg, tabId),
-    'cookie-buttons': () => classifier.pickRejectButton(msg.texts ?? []),
     'page-stats': async () => {
       await setTabStats(tabId, { ...msg.stats, host: msg.host });
       return { ok: true };

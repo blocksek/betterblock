@@ -54,38 +54,31 @@
   ]);
 
   // --- Cookie-consent prompt vocabulary --------------------------------------
-  // Known consent-management platforms: container selector + their reject
-  // button. `shadow: true` means the CMP renders inside a shadow root.
+  // Container selectors of well-known consent-management platforms, plus
+  // generic wording tests for everything else. `shadow: true` means the CMP
+  // renders inside a shadow root (its container is the visible thing to hide).
   const KNOWN_CMPS = [
-    { sel: '#onetrust-banner-sdk, #onetrust-consent-sdk', reject: '#onetrust-reject-all-handler' },
-    { sel: '#CybotCookiebotDialog', reject: '#CybotCookiebotDialogBodyButtonDecline' },
-    { sel: '#qc-cmp2-container, .qc-cmp2-container', reject: null },
-    { sel: '#didomi-host', reject: '#didomi-notice-disagree-button, .didomi-continue-without-agreeing' },
-    { sel: '[id^="sp_message_container"]', reject: null },
-    { sel: '#usercentrics-root', reject: '[data-testid="uc-deny-all-button"]', shadow: true },
-    { sel: '.fc-consent-root', reject: '.fc-cta-do-not-consent' },
-    { sel: '.osano-cm-window', reject: '.osano-cm-denyAll' },
-    { sel: '.cky-consent-container', reject: '.cky-btn-reject' },
-    { sel: '#cookiescript_injected', reject: '#cookiescript_reject' },
-    { sel: '.cc-window', reject: '.cc-deny, .cc-btn.cc-deny' },
-    { sel: '#truste-consent-track', reject: '#truste-consent-required' },
-    { sel: '#cmpbox', reject: '.cmpboxbtnno' },
+    { sel: '#onetrust-banner-sdk, #onetrust-consent-sdk' },
+    { sel: '#CybotCookiebotDialog' },
+    { sel: '#qc-cmp2-container, .qc-cmp2-container' },
+    { sel: '#didomi-host' },
+    { sel: '[id^="sp_message_container"]' },
+    { sel: '#usercentrics-root', shadow: true },
+    { sel: '.fc-consent-root' },
+    { sel: '.osano-cm-window' },
+    { sel: '.cky-consent-container' },
+    { sel: '#cookiescript_injected' },
+    { sel: '.cc-window' },
+    { sel: '#truste-consent-track' },
+    { sel: '#cmpbox' },
   ];
   const COOKIE_WORD_RE = /cookie/i;
   const CONSENT_WORD_RE = /(consent|accept|agree|privacy|gdpr|akzept|zustimm|einwillig|aceptar|consentimiento|accetta|consenso|accepteren|toestemming|akceptuj|zgod|aceitar|consentement|accepter)/i;
-  const REJECT_TEXT_RE = /^\s*(reject|decline|refuse|deny|disagree|no,?\s*thanks|continue without|(use|allow)?\s*(only\s+)?(strictly\s+)?(necessary|essential)(\s+(cookies?|only))?|necessary only|essential only|(alle\s+)?ablehnen|nur (notwendige|erforderliche)|weiter ohne|tout refuser|refuser|continuer sans|rechazar|solo (necesarias|esenciales)|rifiuta( tutto)?|solo essenziali|(alles\s+)?weigeren|alleen noodzakelijk|odrzuć|recusar|apenas necessári|avvis alle|avslå|neka alla|hylkää)/i;
-  const NOT_REJECT_RE = /(settings|manage|preferen|customi[sz]e|options|choices|more info|learn more|read more|policy|purposes|partners|einstellungen|verwalten|paramètres|gérer|configura|impostazioni|instellingen)/i;
-  const MANAGE_TEXT_RE = /(manage|settings|preferen|customi[sz]e|options|choices|configure|purposes|einstellungen|verwalten|anpassen|paramètres|gérer|personnalis|configurar?|impostazioni|preferenze|instellingen|beheren|ustawienia|zarządzaj|configurações|gerir|inställningar|indstillinger)/i;
-  const SAVE_TEXT_RE = /^\s*(save|confirm|submit|apply|allow selection|accept selected|save (and|&) (close|exit)|save (my )?(choices|preferences|settings|selection)|confirm (my )?choices|(auswahl )?speichern|auswahl bestätigen|übernehmen|enregistrer|confirmer|sauvegarder|guardar|confirmar|salva|conferma|opslaan|bevestigen|zapisz|potwierdź|spara|gem|tallenna)/i;
-  const ACCEPT_ALL_RE = /(accept all|allow all|agree to all|enable all|alle akzeptieren|alles akzeptieren|tout accepter|aceptar todo|accetta tutto|alles accepteren|zaakceptuj wszystk)/i;
-  const MAX_COOKIE_CLICKS = 6;
 
   let active = false;
   let threshold = 0.7;
-  let cookieMode = 'reject'; // 'reject' | 'hide' | 'off'
-  let cookieClicks = 0;
+  let cookieMode = 'hide'; // 'hide' | 'off' (legacy stored 'reject' means 'hide')
   const cookieHandled = new WeakSet();
-  const cookieRecords = []; // clicked-reject records (banner dismissed itself)
   let manualSelectors = [];
   let baselineStyle = null;
   let observer = null;
@@ -177,7 +170,7 @@
   function reportStats() {
     stats.manualHidden = hidden.filter((h) => h.record.reason === 'manual').length;
     const cookieHidden = hidden.filter((h) => h.record.reason === 'cookie').length;
-    stats.cookiesHandled = cookieHidden + cookieRecords.length;
+    stats.cookiesHandled = cookieHidden;
     stats.cosmeticHidden =
       stats.baselineHidden + stats.aiHidden + stats.manualHidden + cookieHidden;
     send({ type: 'page-stats', host: PAGE_HOST, stats: { ...stats } });
@@ -393,36 +386,14 @@
   }
 
   // --- Cookie-consent prompts -------------------------------------------------
-  // Strategy: prefer clicking the banner's own "reject all / only necessary"
-  // button (known CMP selector → multilingual text match → ask the local LLM
-  // to pick from the button labels). Never auto-accept. If no reject path
-  // exists (accept-only banners) or mode is 'hide', hide the banner and undo
-  // its side effects: body scroll locks and backdrop overlays.
+  // Strategy: hide the banner (never click, never consent to anything) and
+  // undo its side effects: body scroll locks and backdrop overlays.
 
   function isVisible(el) {
     const rect = el.getBoundingClientRect();
     if (rect.width < 2 || rect.height < 2) return false;
     const cs = getComputedStyle(el);
     return cs.display !== 'none' && cs.visibility !== 'hidden';
-  }
-
-  function buttonCandidates(root) {
-    const out = [];
-    for (const el of root.querySelectorAll(
-      'button, [role="button"], input[type="button"], input[type="submit"], a')) {
-      const text = (el.innerText || el.value || '').replace(/\s+/g, ' ').trim();
-      if (!text || text.length > 60 || !isVisible(el)) continue;
-      out.push({ el, text });
-      if (out.length >= 12) break;
-    }
-    return out;
-  }
-
-  function findRejectButton(root) {
-    for (const { el, text } of buttonCandidates(root)) {
-      if (REJECT_TEXT_RE.test(text) && !NOT_REJECT_RE.test(text)) return el;
-    }
-    return null;
   }
 
   function looksLikeCookiePrompt(el) {
@@ -480,152 +451,21 @@
     reportStats();
   }
 
-  function clickReject(el, btn, banner) {
-    cookieClicks++;
-    cookieRecords.push({
-      reason: 'cookie', action: 'rejected',
-      buttonText: (btn.innerText || btn.value || '').trim().slice(0, 60),
-      ...describe(el),
-    });
-    try { btn.click(); } catch { /* ignore */ }
-    reportStats();
-    // Some banners need a beat to dismiss themselves; if this one didn't,
-    // hide it so the user never sees a half-dead prompt.
-    setTimeout(() => {
-      if (banner.isConnected && isVisible(banner)) hideCookieBanner(banner);
-      else unlockScroll();
-    }, 1200);
-  }
-
-  // Second-step flow for banners without a reject button: open the
-  // "manage preferences" screen and save with the absolute minimum consent —
-  // reject-all inside preferences when it exists, otherwise uncheck every
-  // optional toggle and confirm. Never touches anything matching accept-all.
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-  function findPrefsRoot(banner) {
-    let nodes;
-    try {
-      nodes = document.querySelectorAll(
-        '[role="dialog"], [aria-modal="true"], [id*="preference" i], ' +
-        '[class*="preference" i], [id*="consent" i], [class*="consent" i], ' +
-        '[id*="cookie" i], [class*="cookie" i], [id*="purpose" i], [class*="purpose" i]');
-    } catch { nodes = []; }
-    let best = null;
-    let bestScore = 0;
-    for (const el of nodes) {
-      if (el.dataset.bbHidden || !isVisible(el)) continue;
-      if (el === document.body || el === document.documentElement) continue;
-      // Prefer the pane that actually contains the consent toggles.
-      const toggles = el.querySelectorAll('input[type="checkbox"], [role="switch"]').length;
-      const rect = el.getBoundingClientRect();
-      const score = toggles * 10 + Math.min((rect.width * rect.height) / 10000, 50);
-      if (score > bestScore) { best = el; bestScore = score; }
-    }
-    if (best) return best;
-    return banner.isConnected && isVisible(banner) ? banner : null;
-  }
-
-  async function minimalConsentFlow(banner, manageEl) {
-    cookieClicks++;
-    try { manageEl.click(); } catch { return false; }
-    await sleep(900); // let the preferences UI render
-    const prefRoot = findPrefsRoot(banner);
-    if (!prefRoot) return false;
-    cookieHandled.add(prefRoot);
-
-    // Preference screens often have the reject-all the first layer lacked.
-    const rejectBtn = findRejectButton(prefRoot);
-    if (rejectBtn && cookieClicks < MAX_COOKIE_CLICKS) {
-      clickReject(banner, rejectBtn, prefRoot);
-      return true;
-    }
-
-    // Opt out of everything optional. Disabled toggles are the "strictly
-    // necessary" ones — leave them. Checkbox inputs are often visually
-    // hidden behind styled labels, so don't require visibility here.
-    let toggledOff = 0;
-    for (const input of prefRoot.querySelectorAll(
-      'input[type="checkbox"]:checked:not(:disabled)')) {
-      if (toggledOff >= 25) break;
-      try { input.click(); toggledOff++; } catch { /* ignore */ }
-    }
-    for (const sw of prefRoot.querySelectorAll(
-      '[role="switch"][aria-checked="true"]:not([aria-disabled="true"])')) {
-      if (toggledOff >= 25) break;
-      try { sw.click(); toggledOff++; } catch { /* ignore */ }
-    }
-
-    const saveBtn = buttonCandidates(prefRoot).find(
-      (b) => SAVE_TEXT_RE.test(b.text) && !ACCEPT_ALL_RE.test(b.text));
-    if (!saveBtn || cookieClicks >= MAX_COOKIE_CLICKS) return false;
-    cookieClicks++;
-    cookieRecords.push({
-      reason: 'cookie', action: 'minimized', toggledOff,
-      buttonText: saveBtn.text.slice(0, 60),
-      ...describe(banner),
-    });
-    try { saveBtn.el.click(); } catch { /* ignore */ }
-    reportStats();
-    setTimeout(() => {
-      // If the dialog didn't dismiss itself, finish the job visually.
-      if (prefRoot.isConnected && isVisible(prefRoot) && !prefRoot.dataset.bbHidden) {
-        hideElement(prefRoot, { reason: 'cookie', action: 'hidden', ...describe(prefRoot) });
-      }
-      if (banner.isConnected && isVisible(banner)) hideCookieBanner(banner);
-      else unlockScroll();
-    }, 1200);
-    return true;
-  }
-
-  async function handleCookieBanner(el, rejectSel, shadow) {
+  function handleCookieBanner(el) {
     if (cookieHandled.has(el)) return;
     cookieHandled.add(el);
-    const root = shadow && el.shadowRoot ? el.shadowRoot : el;
-
-    if (cookieMode === 'reject' && cookieClicks < MAX_COOKIE_CLICKS) {
-      let btn = null;
-      if (rejectSel) {
-        try { btn = root.querySelector(rejectSel); } catch { /* bad selector */ }
-      }
-      if (!btn || !isVisible(btn)) btn = findRejectButton(root);
-      if (btn) return clickReject(el, btn, el);
-
-      // No obvious reject button — let the local LLM read the labels and
-      // point at the reject and/or settings button.
-      const btns = buttonCandidates(root);
-      let manageEl = btns.find(
-        (b) => MANAGE_TEXT_RE.test(b.text) && !ACCEPT_ALL_RE.test(b.text))?.el ?? null;
-      if (btns.length) {
-        const res = await send({ type: 'cookie-buttons', texts: btns.map((b) => b.text) });
-        const rejectPick = btns[res?.rejectIndex];
-        if (rejectPick && isVisible(rejectPick.el) && cookieClicks < MAX_COOKIE_CLICKS &&
-            !NOT_REJECT_RE.test(rejectPick.text) && !ACCEPT_ALL_RE.test(rejectPick.text)) {
-          return clickReject(el, rejectPick.el, el);
-        }
-        const settingsPick = btns[res?.settingsIndex];
-        if (!manageEl && settingsPick && isVisible(settingsPick.el) &&
-            !ACCEPT_ALL_RE.test(settingsPick.text)) {
-          manageEl = settingsPick.el;
-        }
-      }
-
-      // No reject anywhere on the first layer: go for minimum consent
-      // through the preferences screen.
-      if (manageEl && await minimalConsentFlow(el, manageEl)) return;
-    }
     hideCookieBanner(el);
   }
 
   function scanCookieBanners() {
     if (!active || cookieMode === 'off' || !document.body) return;
 
-    for (const { sel, reject, shadow } of KNOWN_CMPS) {
+    for (const { sel, shadow } of KNOWN_CMPS) {
       let nodes;
       try { nodes = document.querySelectorAll(sel); } catch { continue; }
       for (const el of nodes) {
         if (!cookieHandled.has(el) && (isVisible(el) || (shadow && el.shadowRoot))) {
-          handleCookieBanner(el, reject, shadow);
+          handleCookieBanner(el);
         }
       }
     }
@@ -644,7 +484,7 @@
     // Handle outermost matches only (a banner often nests many matching divs).
     for (const el of matches) {
       if (!matches.some((o) => o !== el && o.contains(el))) {
-        handleCookieBanner(el, null, false);
+        handleCookieBanner(el);
       }
     }
   }
@@ -842,13 +682,12 @@
 
   function collectDetails() {
     const elements = hidden.map((h, index) => ({ index, ...h.record }));
-    const rejected = cookieRecords.map((r) => ({ index: -1, ...r }));
     const baseline = baselineHits().slice(0, 50).map((el) => ({
       index: -1,
       reason: 'baseline',
       ...describe(el),
     }));
-    return { elements: [...elements, ...rejected, ...baseline], stats, active };
+    return { elements: [...elements, ...baseline], stats, active };
   }
 
   // --- Lifecycle -------------------------------------------------------------

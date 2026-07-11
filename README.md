@@ -57,32 +57,23 @@ small ONNX classifier) can be added later.
 
 ## Cookie-consent prompts
 
-BetterBlock also deals with cookie banners — privacy-first, meaning it will
-**never accept cookies on your behalf**. Default mode is *Reject & hide*:
+BetterBlock hides cookie banners too. It **never clicks anything** in a
+consent dialog — no consent is ever given (or refused) on your behalf; the
+prompt is simply treated like any other page annoyance:
 
 1. **Known CMPs** (OneTrust, Cookiebot, Didomi, Quantcast, Sourcepoint,
-   Usercentrics, Google Funding Choices, Osano, CookieYes, TrustArc, …) get
-   their documented "reject all" button clicked directly.
-2. **Generic banners** are detected by overlay/banner geometry plus
-   cookie/consent wording, and their reject button is found by multilingual
-   text matching ("reject all", "only necessary", "alle ablehnen",
-   "tout refuser", "continuer sans accepter", …).
-3. **Odd phrasing?** The button labels are handed to the on-device LLM, which
-   identifies the reject and/or settings button via structured output.
-4. **No reject button at all** (multi-step CMPs) → BetterBlock goes for the
-   **absolute minimum consent**: it opens the banner's "manage preferences"
-   screen (found by multilingual matching or the LLM), clicks reject-all if
-   one lives there, otherwise unchecks every optional toggle (disabled
-   toggles are the strictly-necessary ones and are left alone) and clicks
-   "save my choices / confirm / allow selection" — never anything matching
-   accept-all.
-5. **Nothing clickable** (accept-only banners) → the banner is hidden and its
-   side effects undone: body scroll locks removed, backdrop overlays cleared.
+   Usercentrics, Google Funding Choices, Osano, CookieYes, TrustArc, …) are
+   recognized by their container selectors and hidden.
+2. **Generic banners** are detected by overlay/banner geometry (fixed/sticky
+   position, dialog role, high z-index) plus multilingual cookie/consent
+   wording — so an article *about* cookies never matches.
+3. **Side effects are undone**: body/html scroll locks are removed and
+   full-screen backdrop overlays cleared, leaving the page usable.
 
-Every handled prompt appears in the popup's element list with a `rejected`,
-`minimal` (hover shows how many toggles were opted out) or `cookie` chip.
-Modes in Settings: *Reject & hide* / *Just hide* (never clicks anything) /
-*Off*.
+Hidden prompts appear in the popup's element list with a `cookie` chip and a
+per-row unhide button (if you need to interact with a banner, unhide it).
+The behavior is a single toggle in Settings; sites may re-show their banner
+on later visits since no consent was recorded — it just gets hidden again.
 
 ## Requirements for the AI backend
 
@@ -142,7 +133,13 @@ src/content.js         Candidate discovery, scoring, element hiding
 popup/                 Toolbar popup UI
 options/               Settings page
 scripts/gen_icons.py   Icon generator (stdlib-only PNG writer)
+test/smoke.js          End-to-end Playwright test (32 checks)
 ```
+
+Run the test with `npm i playwright` (needs a Chromium; set `CHROMIUM_PATH`
+to reuse an existing binary) then `node test/smoke.js`. It loads the unpacked
+extension into headless Chromium and drives ad blocking, the drill-down
+lists, the element picker lifecycle, and cookie-banner hiding.
 
 ## Design notes & limitations
 
