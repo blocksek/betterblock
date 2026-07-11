@@ -68,13 +68,21 @@ BetterBlock also deals with cookie banners — privacy-first, meaning it will
    text matching ("reject all", "only necessary", "alle ablehnen",
    "tout refuser", "continuer sans accepter", …).
 3. **Odd phrasing?** The button labels are handed to the on-device LLM, which
-   picks the rejecting button (or none) via structured output.
-4. **No reject path** (accept-only banners) → the banner is hidden and its
+   identifies the reject and/or settings button via structured output.
+4. **No reject button at all** (multi-step CMPs) → BetterBlock goes for the
+   **absolute minimum consent**: it opens the banner's "manage preferences"
+   screen (found by multilingual matching or the LLM), clicks reject-all if
+   one lives there, otherwise unchecks every optional toggle (disabled
+   toggles are the strictly-necessary ones and are left alone) and clicks
+   "save my choices / confirm / allow selection" — never anything matching
+   accept-all.
+5. **Nothing clickable** (accept-only banners) → the banner is hidden and its
    side effects undone: body scroll locks removed, backdrop overlays cleared.
 
-Every handled prompt appears in the popup's element list with a `rejected` or
-`cookie` chip (hover shows which button was clicked). Modes in Settings:
-*Reject & hide* / *Just hide* (never clicks anything) / *Off*.
+Every handled prompt appears in the popup's element list with a `rejected`,
+`minimal` (hover shows how many toggles were opted out) or `cookie` chip.
+Modes in Settings: *Reject & hide* / *Just hide* (never clicks anything) /
+*Off*.
 
 ## Requirements for the AI backend
 

@@ -177,40 +177,50 @@ export class LocalClassifier {
     return out;
   }
 
-  // Given the visible button labels of a cookie-consent prompt, return the
-  // index of the button that rejects non-essential cookies, or -1. Used only
-  // when the content script's own multilingual regexes found nothing, so this
+  // Given the visible button labels of a cookie-consent prompt, identify
+  // the button that rejects non-essential cookies and the one that opens
+  // the settings/preferences screen (each -1 when absent). Used only when
+  // the content script's own multilingual regexes found nothing, so this
   // handles the odd phrasings ("I'd rather not", uncommon languages, …).
   async pickRejectButton(texts) {
+    const none = { rejectIndex: -1, settingsIndex: -1, source: 'heuristic' };
     const labels = (texts ?? []).slice(0, 12).map((t) => String(t).slice(0, 60));
-    if (!labels.length) return { index: -1, source: 'heuristic' };
+    if (!labels.length) return none;
     const session = await this.ensureSession();
-    if (!session) return { index: -1, source: 'heuristic' };
+    if (!session) return none;
 
     const run = this.queue.then(async () => {
       const prompt =
         `A website cookie-consent dialog has these buttons (JSON array, ` +
         `0-indexed):\n${JSON.stringify(labels)}\n` +
-        `Which single button REJECTS or DECLINES all non-essential cookies ` +
-        `(e.g. "reject all", "only necessary", "continue without agreeing")? ` +
-        `Do NOT pick buttons that accept cookies or open settings/preferences. ` +
-        `Answer with the button's index, or -1 if no button rejects cookies.`;
+        `Identify two buttons:\n` +
+        `- rejectIndex: the button that REJECTS or DECLINES all non-essential ` +
+        `cookies (e.g. "reject all", "only necessary", "continue without agreeing")\n` +
+        `- settingsIndex: the button that opens cookie settings/preferences ` +
+        `(e.g. "manage preferences", "customize", "options")\n` +
+        `Never point either at a button that accepts or enables cookies. ` +
+        `Use -1 for any that is absent.`;
       const raw = await session.prompt(prompt, {
         responseConstraint: {
           type: 'object',
-          properties: { index: { type: 'integer', minimum: -1 } },
-          required: ['index'],
+          properties: {
+            rejectIndex: { type: 'integer', minimum: -1 },
+            settingsIndex: { type: 'integer', minimum: -1 },
+          },
+          required: ['rejectIndex', 'settingsIndex'],
           additionalProperties: false,
         },
       });
-      const index = JSON.parse(raw).index;
+      const parsed = JSON.parse(raw);
+      const idx = (v) => (Number.isInteger(v) && v >= 0 && v < labels.length ? v : -1);
       return {
-        index: Number.isInteger(index) && index >= 0 && index < labels.length ? index : -1,
+        rejectIndex: idx(parsed.rejectIndex),
+        settingsIndex: idx(parsed.settingsIndex),
         source: 'gemini-nano',
       };
     });
     this.queue = run.catch(() => {});
-    return run.catch(() => ({ index: -1, source: 'heuristic' }));
+    return run.catch(() => none);
   }
 
   async #promptBatch(session, batch) {
