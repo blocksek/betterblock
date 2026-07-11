@@ -5,6 +5,7 @@
   "description": "Blocks ads using an on-device AI (Gemini Nano). 100% local: no servers, no telemetry, nothing ever leaves your machine.",
   "minimum_chrome_version": "138",
   "permissions": [
+    "contentSettings",
     "declarativeNetRequest",
     "storage",
     "tabs",

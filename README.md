@@ -67,13 +67,28 @@ prompt is simply treated like any other page annoyance:
 2. **Generic banners** are detected by overlay/banner geometry (fixed/sticky
    position, dialog role, high z-index) plus multilingual cookie/consent
    wording — so an article *about* cookies never matches.
-3. **Side effects are undone**: body/html scroll locks are removed and
-   full-screen backdrop overlays cleared, leaving the page usable.
+3. **Side effects are undone**: body/html scroll locks are removed,
+   full-screen backdrop overlays are cleared, and leftover *transparent*
+   click-blockers are caught by probing `elementFromPoint` at several
+   viewport positions — any full-viewport positioned element sitting on top
+   with no interactive content gets hidden too (with a delayed second sweep
+   for overlays that are re-inserted late).
 
 Hidden prompts appear in the popup's element list with a `cookie` chip and a
 per-row unhide button (if you need to interact with a banner, unhide it).
 The behavior is a single toggle in Settings; sites may re-show their banner
 on later visits since no consent was recorded — it just gets hidden again.
+
+## Permission requests (location / camera / microphone)
+
+By default BetterBlock denies **geolocation, camera and microphone**
+requests site-wide using Chrome's `contentSettings` API — sites are blocked
+before they can even show a prompt. Each of the three has its own toggle in
+Settings, and **allowlisted sites regain the right to ask** (Chrome never
+lets an extension outright *grant* camera/mic access, so allowlisting
+restores the normal prompt, nothing more). These rules are Chrome-managed
+local state; to let one site ask without disabling ad blocking there, use
+Chrome's own site settings for that origin instead.
 
 ## Requirements for the AI backend
 

@@ -103,6 +103,9 @@ async function init() {
   $('threshold-value').textContent = Number(settings.threshold).toFixed(2);
   $('learn-rules').checked = settings.learnNetworkRules;
   $('hide-cookies').checked = (settings.cookieMode ?? 'hide') !== 'off';
+  $('block-geo').checked = settings.blockGeolocation ?? true;
+  $('block-cam').checked = settings.blockCamera ?? true;
+  $('block-mic').checked = settings.blockMicrophone ?? true;
   renderAllowlist();
   renderLearned();
   renderManual();
@@ -121,6 +124,15 @@ async function init() {
   $('hide-cookies').addEventListener('change', (e) => {
     save({ cookieMode: e.target.checked ? 'hide' : 'off' });
   });
+
+  const permToggles = {
+    'block-geo': 'blockGeolocation',
+    'block-cam': 'blockCamera',
+    'block-mic': 'blockMicrophone',
+  };
+  for (const [id, key] of Object.entries(permToggles)) {
+    $(id).addEventListener('change', (e) => save({ [key]: e.target.checked }));
+  }
 
   const addHost = async () => {
     const host = $('allow-input').value.trim().toLowerCase()

@@ -59,6 +59,9 @@ const COOKIE_TWO_STEP = `<!DOCTYPE html><html><head><title>t</title></head><body
 const COOKIE_ACCEPT_ONLY = `<!DOCTYPE html><html><head><title>a</title></head>
 <body style="overflow:hidden">
   <p id="page-content">Article.</p>
+  <button id="click-check" onclick="window.__clicked=true">click me</button>
+  <!-- transparent, unnamed click-blocker that outlives the banner -->
+  <div id="ghost" style="position:fixed;inset:0;z-index:5000"></div>
   <div id="backdrop" class="modal-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:4000"></div>
   <div id="cookie-modal" class="cookie-consent-popup" aria-modal="true"
     style="position:fixed;top:30%;left:30%;width:40%;background:#fff;padding:24px;z-index:4001">
@@ -254,6 +257,11 @@ async function main() {
   check('accept-only: modal hidden', !acceptOnly.modalVisible);
   check('accept-only: backdrop hidden', !acceptOnly.backdropVisible);
   check('accept-only: scroll unlocked', acceptOnly.bodyOverflow !== 'hidden');
+  check('accept-only: transparent click-blocker hidden', await ck.evaluate(() =>
+    getComputedStyle(document.getElementById('ghost')).display === 'none'));
+  await ck.click('#click-check');
+  check('accept-only: page receives clicks again',
+    await ck.evaluate(() => window.__clicked === true));
   const cookieStats = await popup.evaluate((id) =>
     chrome.tabs.query({ url: 'http://localhost:8917/cookie-accept-only' })
       .then(([t]) => new Promise((r) =>
@@ -263,6 +271,30 @@ async function main() {
   check('stats count cookies handled', cookieStats?.stats?.cookiesHandled >= 1);
   console.log('  info: cookie elements =', JSON.stringify(
     (cookieStats?.elements ?? []).filter((e) => e.reason === 'cookie')));
+
+  // --- Feature 4: permission auto-deny --------------------------------------
+  const perm = (api, url) => popup.evaluate(([a, u]) =>
+    chrome.contentSettings[a].get({ primaryUrl: u }), [api, url]);
+  check('geolocation blocked by default',
+    (await perm('location', 'http://localhost:8917/')).setting === 'block');
+  check('camera blocked by default',
+    (await perm('camera', 'http://localhost:8917/')).setting === 'block');
+  check('microphone blocked by default',
+    (await perm('microphone', 'http://localhost:8917/')).setting === 'block');
+  // Functional: geolocation is denied immediately, no prompt.
+  const geoErr = await ck.evaluate(() => new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      () => resolve('granted'), (e) => resolve(e.code), { timeout: 3000 });
+    setTimeout(() => resolve('timeout'), 4000);
+  }));
+  check('geolocation request denied on page (code 1)', geoErr === 1);
+  // Allowlisting a site restores its right to ask.
+  await msg({ type: 'toggle-site', host: 'localhost' });
+  check('allowlisted site may ask again',
+    (await perm('location', 'http://localhost:8917/')).setting === 'ask');
+  await msg({ type: 'toggle-site', host: 'localhost' }); // restore
+  check('un-allowlisting re-blocks',
+    (await perm('location', 'http://localhost:8917/')).setting === 'block');
 
   // Options page still loads clean.
   const options = await ctx.newPage();

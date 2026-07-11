@@ -47,6 +47,24 @@
     </section>
 
     <section>
+      <h2>Permission requests</h2>
+      <p class="hint">Deny these before the site can even show a prompt.
+        Allowlisted sites (below) regain the right to ask.</p>
+      <div class="field row">
+        <label for="block-geo" class="grow">Block location requests</label>
+        <input type="checkbox" id="block-geo">
+      </div>
+      <div class="field row">
+        <label for="block-cam" class="grow">Block camera requests</label>
+        <input type="checkbox" id="block-cam">
+      </div>
+      <div class="field row">
+        <label for="block-mic" class="grow">Block microphone requests</label>
+        <input type="checkbox" id="block-mic">
+      </div>
+    </section>
+
+    <section>
       <h2>Allowlisted sites</h2>
       <p class="hint">BetterBlock is fully disabled on these hostnames.</p>
       <ul id="allowlist" class="pill-list"></ul>

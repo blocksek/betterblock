@@ -442,13 +442,56 @@
     }
   }
 
+  // Some CMPs leave a *transparent*, unnamed overlay behind after the banner
+  // is hidden, so the page can't register clicks. Probe a few viewport points
+  // and hide any full-viewport positioned element that sits on top yet has no
+  // interactive content — that's a click-blocker, not page UI.
+  function clearClickBlockers() {
+    const vw = innerWidth || 1;
+    const vh = innerHeight || 1;
+    const probes = [
+      [vw / 2, vh / 2], [vw * 0.25, vh * 0.3],
+      [vw * 0.75, vh * 0.3], [vw / 2, vh * 0.85],
+    ];
+    for (const [x, y] of probes) {
+      let el = document.elementFromPoint(x, y);
+      while (el && el !== document.body && el !== document.documentElement) {
+        if (el.dataset.bbHidden) break;
+        const cs = getComputedStyle(el);
+        if ((cs.position === 'fixed' || cs.position === 'absolute') &&
+            cs.pointerEvents !== 'none') {
+          const rect = el.getBoundingClientRect();
+          if (rect.width >= vw * 0.9 && rect.height >= vh * 0.9) {
+            const text = (el.innerText || '').replace(/\s+/g, ' ').trim();
+            const interactive = el.querySelector(
+              'button, input, select, textarea, a[href], video, iframe, [role="button"]');
+            if (text.length < 40 && !interactive) {
+              hideElement(el, { reason: 'cookie', action: 'hidden', ...describe(el) });
+              break;
+            }
+          }
+        }
+        el = el.parentElement;
+      }
+    }
+  }
+
   function hideCookieBanner(el) {
     if (!el.dataset.bbHidden) {
       hideElement(el, { reason: 'cookie', action: 'hidden', ...describe(el) });
     }
     unlockScroll();
     hideBackdrops();
+    clearClickBlockers();
     reportStats();
+    // Second pass: overlays are sometimes (re)inserted a beat after the
+    // banner, or scroll locks reapplied — sweep once more.
+    setTimeout(() => {
+      unlockScroll();
+      hideBackdrops();
+      clearClickBlockers();
+      reportStats();
+    }, 700);
   }
 
   function handleCookieBanner(el) {

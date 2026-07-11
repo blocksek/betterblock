@@ -24,6 +24,11 @@ const DEFAULT_SETTINGS = {
   // Cookie prompts: 'hide' = hide banners (and unlock scrolling),
   // 'off' = leave them alone. (Legacy stored 'reject' is treated as 'hide'.)
   cookieMode: 'hide',
+  // Deny permission requests site-wide before any prompt appears.
+  // Allowlisted sites regain the right to ask.
+  blockGeolocation: true,
+  blockCamera: true,
+  blockMicrophone: true,
   allowlist: [], // hostnames where BetterBlock is off
 };
 
@@ -174,6 +179,40 @@ async function syncAllowlistRules(allowlist) {
     },
   }));
   await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds, addRules });
+}
+
+// ---------------------------------------------------------------------------
+// Permission auto-deny via chrome.contentSettings: sites never get to show
+// a location/camera/microphone prompt. Allowlisted sites are set back to
+// 'ask' (Chrome forbids extensions granting 'allow' for camera/mic anyway).
+// These rules are Chrome-managed local state — nothing leaves the machine.
+
+const PERMISSION_SETTINGS = [
+  ['blockGeolocation', 'location'],
+  ['blockCamera', 'camera'],
+  ['blockMicrophone', 'microphone'],
+];
+
+async function syncPermissionRules(settings) {
+  for (const [key, api] of PERMISSION_SETTINGS) {
+    const cs = chrome.contentSettings?.[api];
+    if (!cs) continue;
+    try {
+      await cs.clear({});
+      if (!settings[key]) continue;
+      await cs.set({ primaryPattern: '<all_urls>', setting: 'block' });
+      // More-specific patterns take precedence over <all_urls>.
+      for (const host of settings.allowlist) {
+        for (const pattern of [`*://${host}/*`, `*://*.${host}/*`]) {
+          try {
+            await cs.set({ primaryPattern: pattern, setting: 'ask' });
+          } catch { /* odd host, e.g. IP with port — skip pattern */ }
+        }
+      }
+    } catch (e) {
+      console.warn('BetterBlock: contentSettings sync failed for', api, e);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -366,13 +405,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const allowlist = settings.allowlist.includes(host)
         ? settings.allowlist.filter((h) => h !== host)
         : [...settings.allowlist, host];
-      await saveSettings({ allowlist });
+      const next = await saveSettings({ allowlist });
       await syncAllowlistRules(allowlist);
+      await syncPermissionRules(next);
       return { ok: true, allowlisted: allowlist.includes(host) };
     },
     'save-settings': async () => {
-      const next = await saveSettings(msg.patch ?? {});
-      if (msg.patch?.allowlist) await syncAllowlistRules(next.allowlist);
+      const patch = msg.patch ?? {};
+      const next = await saveSettings(patch);
+      if (patch.allowlist) await syncAllowlistRules(next.allowlist);
+      if (patch.allowlist || PERMISSION_SETTINGS.some(([key]) => key in patch)) {
+        await syncPermissionRules(next);
+      }
       return { ok: true, settings: next };
     },
     'get-tab-details': async () => ({
@@ -421,6 +465,7 @@ chrome.runtime.onInstalled.addListener(async () => {
   });
   const settings = await getSettings();
   await syncAllowlistRules(settings.allowlist);
+  await syncPermissionRules(settings);
 });
 
 chrome.action.setBadgeBackgroundColor({ color: '#4f46e5' });
