@@ -34,6 +34,25 @@
     </section>
 
     <section>
+      <h2>Cookie prompts</h2>
+      <p class="hint">How BetterBlock handles cookie-consent banners. It will
+        never accept cookies on your behalf.</p>
+      <div class="field radio-group">
+        <label class="row"><input type="radio" name="cookie-mode" value="reject">
+          <span><strong>Reject &amp; hide</strong>
+          <span class="hint">Click "reject all / only necessary" when the banner has one
+          (found via known selectors, multilingual matching, or the on-device AI reading
+          the button labels); otherwise hide the banner and unlock scrolling.</span></span></label>
+        <label class="row"><input type="radio" name="cookie-mode" value="hide">
+          <span><strong>Just hide</strong>
+          <span class="hint">Never click anything — hide the banner and unlock scrolling.</span></span></label>
+        <label class="row"><input type="radio" name="cookie-mode" value="off">
+          <span><strong>Off</strong>
+          <span class="hint">Leave cookie prompts alone.</span></span></label>
+      </div>
+    </section>
+
+    <section>
       <h2>Allowlisted sites</h2>
       <p class="hint">BetterBlock is fully disabled on these hostnames.</p>
       <ul id="allowlist" class="pill-list"></ul>

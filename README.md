@@ -55,6 +55,27 @@ that can't run the model. The classifier is a pluggable interface
 (`src/llm.js`), so other fully-local backends (WebLLM, transformers.js with a
 small ONNX classifier) can be added later.
 
+## Cookie-consent prompts
+
+BetterBlock also deals with cookie banners — privacy-first, meaning it will
+**never accept cookies on your behalf**. Default mode is *Reject & hide*:
+
+1. **Known CMPs** (OneTrust, Cookiebot, Didomi, Quantcast, Sourcepoint,
+   Usercentrics, Google Funding Choices, Osano, CookieYes, TrustArc, …) get
+   their documented "reject all" button clicked directly.
+2. **Generic banners** are detected by overlay/banner geometry plus
+   cookie/consent wording, and their reject button is found by multilingual
+   text matching ("reject all", "only necessary", "alle ablehnen",
+   "tout refuser", "continuer sans accepter", …).
+3. **Odd phrasing?** The button labels are handed to the on-device LLM, which
+   picks the rejecting button (or none) via structured output.
+4. **No reject path** (accept-only banners) → the banner is hidden and its
+   side effects undone: body scroll locks removed, backdrop overlays cleared.
+
+Every handled prompt appears in the popup's element list with a `rejected` or
+`cookie` chip (hover shows which button was clicked). Modes in Settings:
+*Reject & hide* / *Just hide* (never clicks anything) / *Off*.
+
 ## Requirements for the AI backend
 
 Gemini Nano via the Prompt API needs:

@@ -130,7 +130,10 @@ async function showElements() {
   };
   showPanel(res.elements.map((e) => {
     let chip, chipClass;
-    if (e.reason === 'ai') {
+    if (e.reason === 'cookie') {
+      chip = e.action === 'rejected' ? 'rejected' : 'cookie';
+      chipClass = 'cookie';
+    } else if (e.reason === 'ai') {
       chip = (e.source === 'gemini-nano' ? 'AI ' : 'heur ') + Math.round((e.confidence ?? 0) * 100) + '%';
       chipClass = e.source === 'gemini-nano' ? 'ai' : 'heuristic';
     } else {
@@ -139,7 +142,8 @@ async function showElements() {
     const removable = e.index >= 0;
     return row({
       what: elementLabel(e),
-      title: [elementLabel(e), e.text, e.selector].filter(Boolean).join('\n'),
+      title: [elementLabel(e), e.text, e.selector, e.buttonText && `clicked: ${e.buttonText}`]
+        .filter(Boolean).join('\n'),
       meta: e.width ? `${e.width}×${e.height}` : '',
       chip,
       chipClass,

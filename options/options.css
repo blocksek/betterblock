@@ -96,5 +96,9 @@ button.subtle { background: transparent; color: var(--indigo); border: 1px solid
 }
 .pill-list .x:hover { color: #dc2626; }
 
+.radio-group { display: grid; gap: 10px; }
+.radio-group label { align-items: flex-start; cursor: pointer; }
+.radio-group input { margin-top: 2px; flex-shrink: 0; }
+
 .privacy p { font-size: 13px; color: var(--muted); }
 .privacy strong { color: var(--fg); }

@@ -21,6 +21,9 @@ const DEFAULT_SETTINGS = {
   threshold: 0.7,
   // Allow AI verdicts to create network-level block rules for ad iframe hosts.
   learnNetworkRules: true,
+  // Cookie prompts: 'reject' = click reject-all (hide as fallback),
+  // 'hide' = just hide the banner, 'off' = leave them alone.
+  cookieMode: 'reject',
   allowlist: [], // hostnames where BetterBlock is off
 };
 
@@ -240,12 +243,15 @@ chrome.webRequest.onErrorOccurred.addListener((details) => {
   });
 }, { urls: ['<all_urls>'] });
 
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.status === 'loading') {
-    netLogs.set(tabId, []);
-    chrome.storage.session.remove('netLog:' + tabId);
-  }
-});
+// Reset the log on navigation. Uses onBeforeRequest(main_frame) rather than
+// tabs.onUpdated because it shares an ordered event pipeline with
+// onErrorOccurred — a late-arriving tab event could otherwise wipe blocks
+// that were logged just after the navigation committed.
+chrome.webRequest.onBeforeRequest.addListener((details) => {
+  if (details.tabId < 0) return;
+  netLogs.set(details.tabId, []);
+  chrome.storage.session.remove('netLog:' + details.tabId);
+}, { urls: ['<all_urls>'], types: ['main_frame'] });
 
 // ---------------------------------------------------------------------------
 // Per-tab cosmetic stats (session-scoped, for the popup)
@@ -318,10 +324,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         enabled: settings.enabled,
         allowlisted: isAllowlisted(settings, msg.host),
         threshold: settings.threshold,
+        cookieMode: settings.cookieMode,
         manualSelectors: (manual[baseHost(msg.host)] ?? []).map((r) => r.selector),
       };
     },
     'classify': () => handleClassify(msg, tabId),
+    'cookie-buttons': () => classifier.pickRejectButton(msg.texts ?? []),
     'page-stats': async () => {
       await setTabStats(tabId, { ...msg.stats, host: msg.host });
       return { ok: true };

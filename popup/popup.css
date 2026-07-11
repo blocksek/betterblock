@@ -8,6 +8,7 @@
   --green: #16a34a;
   --amber: #d97706;
   --red: #dc2626;
+  --teal: #0d9488;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -137,6 +138,7 @@ section { padding: 10px 14px; }
 .chip.heuristic { background: color-mix(in srgb, var(--amber) 15%, transparent); color: var(--amber); }
 .chip.baseline { background: color-mix(in srgb, var(--muted) 15%, transparent); color: var(--muted); }
 .chip.manual { background: color-mix(in srgb, var(--green) 15%, transparent); color: var(--green); }
+.chip.cookie { background: color-mix(in srgb, var(--teal) 15%, transparent); color: var(--teal); }
 .unhide {
   background: transparent;
   border: 1px solid var(--border);

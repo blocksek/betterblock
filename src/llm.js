@@ -177,6 +177,42 @@ export class LocalClassifier {
     return out;
   }
 
+  // Given the visible button labels of a cookie-consent prompt, return the
+  // index of the button that rejects non-essential cookies, or -1. Used only
+  // when the content script's own multilingual regexes found nothing, so this
+  // handles the odd phrasings ("I'd rather not", uncommon languages, …).
+  async pickRejectButton(texts) {
+    const labels = (texts ?? []).slice(0, 12).map((t) => String(t).slice(0, 60));
+    if (!labels.length) return { index: -1, source: 'heuristic' };
+    const session = await this.ensureSession();
+    if (!session) return { index: -1, source: 'heuristic' };
+
+    const run = this.queue.then(async () => {
+      const prompt =
+        `A website cookie-consent dialog has these buttons (JSON array, ` +
+        `0-indexed):\n${JSON.stringify(labels)}\n` +
+        `Which single button REJECTS or DECLINES all non-essential cookies ` +
+        `(e.g. "reject all", "only necessary", "continue without agreeing")? ` +
+        `Do NOT pick buttons that accept cookies or open settings/preferences. ` +
+        `Answer with the button's index, or -1 if no button rejects cookies.`;
+      const raw = await session.prompt(prompt, {
+        responseConstraint: {
+          type: 'object',
+          properties: { index: { type: 'integer', minimum: -1 } },
+          required: ['index'],
+          additionalProperties: false,
+        },
+      });
+      const index = JSON.parse(raw).index;
+      return {
+        index: Number.isInteger(index) && index >= 0 && index < labels.length ? index : -1,
+        source: 'gemini-nano',
+      };
+    });
+    this.queue = run.catch(() => {});
+    return run.catch(() => ({ index: -1, source: 'heuristic' }));
+  }
+
   async #promptBatch(session, batch) {
     const records = batch.map((item, i) => ({ id: i, ...sanitizeFeatures(item.features) }));
     const prompt = `Classify these page elements:\n${JSON.stringify(records)}`;

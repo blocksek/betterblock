@@ -102,6 +102,9 @@ async function init() {
   $('threshold').value = settings.threshold;
   $('threshold-value').textContent = Number(settings.threshold).toFixed(2);
   $('learn-rules').checked = settings.learnNetworkRules;
+  const cookieRadio = document.querySelector(
+    `input[name="cookie-mode"][value="${settings.cookieMode ?? 'reject'}"]`);
+  if (cookieRadio) cookieRadio.checked = true;
   renderAllowlist();
   renderLearned();
   renderManual();
@@ -116,6 +119,12 @@ async function init() {
   $('learn-rules').addEventListener('change', (e) => {
     save({ learnNetworkRules: e.target.checked });
   });
+
+  for (const radio of document.querySelectorAll('input[name="cookie-mode"]')) {
+    radio.addEventListener('change', (e) => {
+      if (e.target.checked) save({ cookieMode: e.target.value });
+    });
+  }
 
   const addHost = async () => {
     const host = $('allow-input').value.trim().toLowerCase()

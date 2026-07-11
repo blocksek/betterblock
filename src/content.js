@@ -53,8 +53,35 @@
     '200x200', '234x60', '180x150', '125x125', '300x1050', '930x180',
   ]);
 
+  // --- Cookie-consent prompt vocabulary --------------------------------------
+  // Known consent-management platforms: container selector + their reject
+  // button. `shadow: true` means the CMP renders inside a shadow root.
+  const KNOWN_CMPS = [
+    { sel: '#onetrust-banner-sdk, #onetrust-consent-sdk', reject: '#onetrust-reject-all-handler' },
+    { sel: '#CybotCookiebotDialog', reject: '#CybotCookiebotDialogBodyButtonDecline' },
+    { sel: '#qc-cmp2-container, .qc-cmp2-container', reject: null },
+    { sel: '#didomi-host', reject: '#didomi-notice-disagree-button, .didomi-continue-without-agreeing' },
+    { sel: '[id^="sp_message_container"]', reject: null },
+    { sel: '#usercentrics-root', reject: '[data-testid="uc-deny-all-button"]', shadow: true },
+    { sel: '.fc-consent-root', reject: '.fc-cta-do-not-consent' },
+    { sel: '.osano-cm-window', reject: '.osano-cm-denyAll' },
+    { sel: '.cky-consent-container', reject: '.cky-btn-reject' },
+    { sel: '#cookiescript_injected', reject: '#cookiescript_reject' },
+    { sel: '.cc-window', reject: '.cc-deny, .cc-btn.cc-deny' },
+    { sel: '#truste-consent-track', reject: '#truste-consent-required' },
+    { sel: '#cmpbox', reject: '.cmpboxbtnno' },
+  ];
+  const COOKIE_WORD_RE = /cookie/i;
+  const CONSENT_WORD_RE = /(consent|accept|agree|privacy|gdpr|akzept|zustimm|einwillig|aceptar|consentimiento|accetta|consenso|accepteren|toestemming|akceptuj|zgod|aceitar|consentement|accepter)/i;
+  const REJECT_TEXT_RE = /^\s*(reject|decline|refuse|deny|disagree|no,?\s*thanks|continue without|(use|allow)?\s*(only\s+)?(strictly\s+)?(necessary|essential)(\s+(cookies?|only))?|necessary only|essential only|(alle\s+)?ablehnen|nur (notwendige|erforderliche)|weiter ohne|tout refuser|refuser|continuer sans|rechazar|solo (necesarias|esenciales)|rifiuta( tutto)?|solo essenziali|(alles\s+)?weigeren|alleen noodzakelijk|odrzuć|recusar|apenas necessári|avvis alle|avslå|neka alla|hylkää)/i;
+  const NOT_REJECT_RE = /(settings|manage|preferen|customi[sz]e|options|choices|more info|learn more|read more|policy|purposes|partners|einstellungen|verwalten|paramètres|gérer|configura|impostazioni|instellingen)/i;
+
   let active = false;
   let threshold = 0.7;
+  let cookieMode = 'reject'; // 'reject' | 'hide' | 'off'
+  let cookieClicks = 0;
+  const cookieHandled = new WeakSet();
+  const cookieRecords = []; // clicked-reject records (banner dismissed itself)
   let manualSelectors = [];
   let baselineStyle = null;
   let observer = null;
@@ -145,14 +172,11 @@
 
   function reportStats() {
     stats.manualHidden = hidden.filter((h) => h.record.reason === 'manual').length;
-    send({
-      type: 'page-stats',
-      host: PAGE_HOST,
-      stats: {
-        ...stats,
-        cosmeticHidden: stats.baselineHidden + stats.aiHidden + stats.manualHidden,
-      },
-    });
+    const cookieHidden = hidden.filter((h) => h.record.reason === 'cookie').length;
+    stats.cookiesHandled = cookieHidden + cookieRecords.length;
+    stats.cosmeticHidden =
+      stats.baselineHidden + stats.aiHidden + stats.manualHidden + cookieHidden;
+    send({ type: 'page-stats', host: PAGE_HOST, stats: { ...stats } });
   }
 
   // --- Tier 1: baseline CSS -------------------------------------------------
@@ -364,6 +388,170 @@
     await send({ type: 'manual-add', host: PAGE_HOST, selector, sample });
   }
 
+  // --- Cookie-consent prompts -------------------------------------------------
+  // Strategy: prefer clicking the banner's own "reject all / only necessary"
+  // button (known CMP selector → multilingual text match → ask the local LLM
+  // to pick from the button labels). Never auto-accept. If no reject path
+  // exists (accept-only banners) or mode is 'hide', hide the banner and undo
+  // its side effects: body scroll locks and backdrop overlays.
+
+  function isVisible(el) {
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) return false;
+    const cs = getComputedStyle(el);
+    return cs.display !== 'none' && cs.visibility !== 'hidden';
+  }
+
+  function buttonCandidates(root) {
+    const out = [];
+    for (const el of root.querySelectorAll(
+      'button, [role="button"], input[type="button"], input[type="submit"], a')) {
+      const text = (el.innerText || el.value || '').replace(/\s+/g, ' ').trim();
+      if (!text || text.length > 60 || !isVisible(el)) continue;
+      out.push({ el, text });
+      if (out.length >= 12) break;
+    }
+    return out;
+  }
+
+  function findRejectButton(root) {
+    for (const { el, text } of buttonCandidates(root)) {
+      if (REJECT_TEXT_RE.test(text) && !NOT_REJECT_RE.test(text)) return el;
+    }
+    return null;
+  }
+
+  function looksLikeCookiePrompt(el) {
+    const text = (el.innerText || '').slice(0, 4000);
+    if (!text || text.length < 30) return false;
+    const cookieMentions = (text.match(/cookie/gi) || []).length;
+    if (!(COOKIE_WORD_RE.test(text) && (CONSENT_WORD_RE.test(text) || cookieMentions >= 3))) {
+      return false;
+    }
+    // Must be an overlay/banner, not an article that talks about cookies.
+    const cs = getComputedStyle(el);
+    const overlayish =
+      cs.position === 'fixed' || cs.position === 'sticky' ||
+      el.getAttribute('role') === 'dialog' || el.getAttribute('aria-modal') === 'true' ||
+      (cs.position === 'absolute' && (parseInt(cs.zIndex, 10) || 0) >= 100);
+    return overlayish;
+  }
+
+  function unlockScroll() {
+    for (const el of [document.documentElement, document.body]) {
+      if (!el) continue;
+      const cs = getComputedStyle(el);
+      if (cs.overflow === 'hidden' || cs.overflowY === 'hidden') {
+        el.style.setProperty('overflow', 'auto', 'important');
+      }
+    }
+  }
+
+  function hideBackdrops() {
+    let nodes;
+    try {
+      nodes = document.querySelectorAll(
+        '[class*="overlay" i], [class*="backdrop" i], [class*="scrim" i]');
+    } catch { return; }
+    const vw = innerWidth || 1;
+    const vh = innerHeight || 1;
+    for (const el of nodes) {
+      if (el.dataset.bbHidden || !isVisible(el)) continue;
+      const rect = el.getBoundingClientRect();
+      const cs = getComputedStyle(el);
+      const text = (el.innerText || '').trim();
+      if (cs.position === 'fixed' && rect.width > vw * 0.7 && rect.height > vh * 0.7 &&
+          text.length < 40) {
+        hideElement(el, { reason: 'cookie', action: 'hidden', ...describe(el) });
+      }
+    }
+  }
+
+  function hideCookieBanner(el) {
+    if (!el.dataset.bbHidden) {
+      hideElement(el, { reason: 'cookie', action: 'hidden', ...describe(el) });
+    }
+    unlockScroll();
+    hideBackdrops();
+    reportStats();
+  }
+
+  function clickReject(el, btn, banner) {
+    cookieClicks++;
+    cookieRecords.push({
+      reason: 'cookie', action: 'rejected',
+      buttonText: (btn.innerText || btn.value || '').trim().slice(0, 60),
+      ...describe(el),
+    });
+    try { btn.click(); } catch { /* ignore */ }
+    reportStats();
+    // Some banners need a beat to dismiss themselves; if this one didn't,
+    // hide it so the user never sees a half-dead prompt.
+    setTimeout(() => {
+      if (banner.isConnected && isVisible(banner)) hideCookieBanner(banner);
+      else unlockScroll();
+    }, 1200);
+  }
+
+  async function handleCookieBanner(el, rejectSel, shadow) {
+    if (cookieHandled.has(el)) return;
+    cookieHandled.add(el);
+    const root = shadow && el.shadowRoot ? el.shadowRoot : el;
+
+    if (cookieMode === 'reject' && cookieClicks < 3) {
+      let btn = null;
+      if (rejectSel) {
+        try { btn = root.querySelector(rejectSel); } catch { /* bad selector */ }
+      }
+      if (!btn || !isVisible(btn)) btn = findRejectButton(root);
+      if (btn) return clickReject(el, btn, el);
+
+      // No obvious reject button — let the local LLM read the labels.
+      const btns = buttonCandidates(root);
+      if (btns.length) {
+        const res = await send({ type: 'cookie-buttons', texts: btns.map((b) => b.text) });
+        const pick = btns[res?.index];
+        if (pick && isVisible(pick.el) && cookieClicks < 3 &&
+            !NOT_REJECT_RE.test(pick.text)) {
+          return clickReject(el, pick.el, el);
+        }
+      }
+    }
+    hideCookieBanner(el);
+  }
+
+  function scanCookieBanners() {
+    if (!active || cookieMode === 'off' || !document.body) return;
+
+    for (const { sel, reject, shadow } of KNOWN_CMPS) {
+      let nodes;
+      try { nodes = document.querySelectorAll(sel); } catch { continue; }
+      for (const el of nodes) {
+        if (!cookieHandled.has(el) && (isVisible(el) || (shadow && el.shadowRoot))) {
+          handleCookieBanner(el, reject, shadow);
+        }
+      }
+    }
+
+    // Generic: cookie/consent-named overlays and dialogs.
+    let nodes;
+    try {
+      nodes = document.querySelectorAll(
+        '[id*="cookie" i], [class*="cookie" i], [id*="consent" i], [class*="consent" i], ' +
+        '[aria-label*="cookie" i], dialog, [role="dialog"], [aria-modal="true"]');
+    } catch { return; }
+    const matches = [...nodes].filter(
+      (el) => !cookieHandled.has(el) && !el.dataset.bbHidden &&
+        el !== document.body && el !== document.documentElement &&
+        isVisible(el) && looksLikeCookiePrompt(el));
+    // Handle outermost matches only (a banner often nests many matching divs).
+    for (const el of matches) {
+      if (!matches.some((o) => o !== el && o.contains(el))) {
+        handleCookieBanner(el, null, false);
+      }
+    }
+  }
+
   // --- Tier 2: candidate discovery & scoring --------------------------------
 
   function scoreElement(el, f) {
@@ -500,6 +688,7 @@
 
   function scan(root = document) {
     applyManualRules();
+    scanCookieBanners();
     if (!active || candidatesSeen >= MAX_PER_PAGE) {
       reportStats();
       return;
@@ -556,12 +745,13 @@
 
   function collectDetails() {
     const elements = hidden.map((h, index) => ({ index, ...h.record }));
+    const rejected = cookieRecords.map((r) => ({ index: -1, ...r }));
     const baseline = baselineHits().slice(0, 50).map((el) => ({
       index: -1,
       reason: 'baseline',
       ...describe(el),
     }));
-    return { elements: [...elements, ...baseline], stats, active };
+    return { elements: [...elements, ...rejected, ...baseline], stats, active };
   }
 
   // --- Lifecycle -------------------------------------------------------------
@@ -627,6 +817,7 @@
   send({ type: 'get-config', host: PAGE_HOST }).then((cfg) => {
     if (!cfg || cfg.error) return;
     threshold = cfg.threshold ?? threshold;
+    cookieMode = cfg.cookieMode ?? cookieMode;
     manualSelectors = cfg.manualSelectors ?? [];
     if (cfg.enabled && !cfg.allowlisted) {
       activate();
