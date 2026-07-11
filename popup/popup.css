@@ -22,7 +22,7 @@
 * { box-sizing: border-box; margin: 0; }
 
 body {
-  width: 300px;
+  width: 340px;
   font: 13px/1.45 system-ui, -apple-system, sans-serif;
   background: var(--bg);
   color: var(--fg);
@@ -87,9 +87,81 @@ section { padding: 10px 14px; }
   border-radius: 8px;
   padding: 8px;
   text-align: center;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
 }
+.count:hover, .count.open { border-color: var(--indigo); }
 .count .num { font-size: 20px; font-weight: 700; color: var(--indigo); }
 .count .label { font-size: 10px; color: var(--muted); }
+
+#details {
+  border-bottom: 1px solid var(--border);
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+#details-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+#details-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 2px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+#details-list li:last-child { border-bottom: 0; }
+#details-list .what {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#details-list .meta { color: var(--muted); font-size: 10px; flex-shrink: 0; }
+.chip {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border-radius: 4px;
+  padding: 1px 5px;
+  flex-shrink: 0;
+  text-transform: uppercase;
+}
+.chip.ai { background: color-mix(in srgb, var(--indigo) 15%, transparent); color: var(--indigo); }
+.chip.heuristic { background: color-mix(in srgb, var(--amber) 15%, transparent); color: var(--amber); }
+.chip.baseline { background: color-mix(in srgb, var(--muted) 15%, transparent); color: var(--muted); }
+.chip.manual { background: color-mix(in srgb, var(--green) 15%, transparent); color: var(--green); }
+.unhide {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  padding: 1px 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.unhide:hover { color: var(--indigo); border-color: var(--indigo); }
+
+#picker-btn.wide {
+  width: 100%;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--indigo);
+  font: inherit;
+  font-weight: 600;
+  padding: 7px;
+  cursor: pointer;
+}
+#picker-btn.wide:hover { border-color: var(--indigo); background: var(--panel); }
+#picker-btn:disabled { opacity: 0.45; cursor: default; }
 
 .toggle-row { padding-top: 8px; padding-bottom: 8px; }
 #site-host { color: var(--muted); }

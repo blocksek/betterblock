@@ -5,7 +5,9 @@ Chrome's built-in Prompt API). Privacy is the whole point:
 
 - **Zero network requests.** The extension contains no `fetch`, no XHR, no
   remote filter-list updates, no telemetry, no analytics. You can grep the
-  source to confirm.
+  source to confirm. (The `webRequest` permission is used purely
+  observationally — to log which requests *Chrome already blocked* so the
+  popup can show them to you; the log is per-tab, session-only, local.)
 - **All AI inference is on-device.** Gemini Nano is downloaded and managed by
   Chrome itself and runs locally. Page content used for classification never
   leaves your machine.
@@ -84,8 +86,21 @@ progress), **Enable AI** (one-time model download), or **Heuristic mode**.
   Chrome's declarativeNetRequest engine — no request observation needed).
 - The **popup** shows blocked requests, hidden elements, AI status, and
   per-site / global kill switches.
+- **Click either counter** to drill into exactly what was blocked:
+  - *Requests blocked* lists each blocked request (host, path, resource type;
+    hover for the full URL), newest first.
+  - *Elements hidden* lists every hidden element with why: `AI 92%`
+    (Gemini Nano verdict + confidence), `heur` (heuristic fallback), `filter`
+    (baseline cosmetic CSS) or `you` (picked manually) — each with an
+    **unhide** button.
+- **Hide any element yourself** (Safari-style): popup → *"⌖ Hide an element on
+  this page…"*, then hover to highlight, **↑/↓** to widen/narrow the selection,
+  click to hide, Esc to cancel. Picks are saved as per-site rules and re-applied
+  on every visit (even if the site is allowlisted — it's your explicit choice).
+  Undo from the popup's element list or Settings → *Elements you hid*.
 - **Settings** (options page): AI confidence threshold, toggle rule-learning,
-  allowlist, review/remove AI-learned block rules, clear the verdict cache.
+  allowlist, review/remove AI-learned block rules and manually hidden
+  elements, clear the verdict cache.
 
 ## Repository layout
 

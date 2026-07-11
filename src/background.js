@@ -174,6 +174,80 @@ async function syncAllowlistRules(allowlist) {
 }
 
 // ---------------------------------------------------------------------------
+// Manual element-hide rules (from the picker), keyed by base host
+
+const MANUAL_KEY = 'manualRules'; // { host: [{selector, sample, createdAt}] }
+
+async function getManualRules() {
+  return (await chrome.storage.local.get(MANUAL_KEY))[MANUAL_KEY] ?? {};
+}
+
+async function addManualRule(host, selector, sample) {
+  host = baseHost(host);
+  if (!host || !selector) return;
+  const rules = await getManualRules();
+  const list = rules[host] ?? [];
+  if (!list.some((r) => r.selector === selector)) {
+    list.push({ selector, sample: sample ?? null, createdAt: Date.now() });
+    rules[host] = list;
+    await chrome.storage.local.set({ [MANUAL_KEY]: rules });
+  }
+}
+
+async function removeManualRule(host, selector) {
+  host = baseHost(host);
+  const rules = await getManualRules();
+  if (!rules[host]) return;
+  rules[host] = rules[host].filter((r) => r.selector !== selector);
+  if (!rules[host].length) delete rules[host];
+  await chrome.storage.local.set({ [MANUAL_KEY]: rules });
+}
+
+// ---------------------------------------------------------------------------
+// Per-tab blocked-request log. declarativeNetRequest blocks silently, so we
+// observe (never modify) request *failures* and keep the ones Chrome reports
+// as blocked-by-extension. Log lives in session storage only — cleared on
+// navigation and when the browser closes, never transmitted anywhere.
+
+const NET_LOG_MAX = 300;
+const netLogs = new Map(); // tabId -> [{url, type, ts}]
+const netLogTimers = new Map();
+
+async function getNetLog(tabId) {
+  if (!netLogs.has(tabId)) {
+    const stored = (await chrome.storage.session.get('netLog:' + tabId))['netLog:' + tabId] ?? [];
+    if (!netLogs.has(tabId)) netLogs.set(tabId, stored); // keep race winner
+  }
+  return netLogs.get(tabId);
+}
+
+function scheduleNetLogWrite(tabId) {
+  if (netLogTimers.has(tabId)) return;
+  netLogTimers.set(tabId, setTimeout(() => {
+    netLogTimers.delete(tabId);
+    const log = netLogs.get(tabId);
+    if (log) chrome.storage.session.set({ ['netLog:' + tabId]: log });
+  }, 1000));
+}
+
+chrome.webRequest.onErrorOccurred.addListener((details) => {
+  if (details.error !== 'net::ERR_BLOCKED_BY_CLIENT') return;
+  if (details.tabId < 0) return;
+  getNetLog(details.tabId).then((log) => {
+    log.push({ url: details.url, type: details.type, ts: details.timeStamp });
+    if (log.length > NET_LOG_MAX) log.splice(0, log.length - NET_LOG_MAX);
+    scheduleNetLogWrite(details.tabId);
+  });
+}, { urls: ['<all_urls>'] });
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === 'loading') {
+    netLogs.set(tabId, []);
+    chrome.storage.session.remove('netLog:' + tabId);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Per-tab cosmetic stats (session-scoped, for the popup)
 
 async function setTabStats(tabId, stats) {
@@ -187,7 +261,8 @@ async function getTabStats(tabId) {
 }
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  chrome.storage.session.remove('tabStats:' + tabId);
+  netLogs.delete(tabId);
+  chrome.storage.session.remove(['tabStats:' + tabId, 'netLog:' + tabId]);
 });
 
 // ---------------------------------------------------------------------------
@@ -238,11 +313,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   const handlers = {
     'get-config': async () => {
-      const settings = await getSettings();
+      const [settings, manual] = await Promise.all([getSettings(), getManualRules()]);
       return {
         enabled: settings.enabled,
         allowlisted: isAllowlisted(settings, msg.host),
         threshold: settings.threshold,
+        manualSelectors: (manual[baseHost(msg.host)] ?? []).map((r) => r.selector),
       };
     },
     'classify': () => handleClassify(msg, tabId),
@@ -257,12 +333,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         getTabStats(msg.tabId),
         getLearnedDomains(),
       ]);
-      let networkBlocked = null;
-      try {
-        // Quota-limited API; the popup tolerates null.
-        const matched = await chrome.declarativeNetRequest.getMatchedRules({ tabId: msg.tabId });
-        networkBlocked = matched.rulesMatchedInfo.length;
-      } catch { /* quota exceeded — skip */ }
+      const networkBlocked = msg.tabId != null ? (await getNetLog(msg.tabId)).length : null;
       return {
         settings,
         llm,
@@ -297,6 +368,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (msg.patch?.allowlist) await syncAllowlistRules(next.allowlist);
       return { ok: true, settings: next };
     },
+    'get-tab-details': async () => ({
+      requests: msg.tabId != null ? await getNetLog(msg.tabId) : [],
+    }),
+    'manual-add': async () => {
+      await addManualRule(msg.host, msg.selector, msg.sample);
+      return { ok: true };
+    },
+    'manual-remove': async () => {
+      await removeManualRule(msg.host, msg.selector);
+      return { ok: true };
+    },
+    'get-manual': async () => ({ rules: await getManualRules() }),
     'get-learned': async () => ({ learned: await getLearnedDomains() }),
     'remove-learned': async () => {
       await removeLearnedDomain(msg.host);

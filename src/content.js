@@ -9,6 +9,10 @@
 //   3. The background's local LLM classifies those candidates; elements
 //      judged ads above the confidence threshold get hidden.
 //
+// Plus user-driven hiding: an element picker (Safari-style "hide element")
+// whose selections persist as per-site rules, applied on every page load
+// independently of the protection toggle.
+//
 // Nothing here touches the network. Candidate features sent to the
 // background stay inside the extension on this machine.
 
@@ -51,14 +55,17 @@
 
   let active = false;
   let threshold = 0.7;
+  let manualSelectors = [];
   let baselineStyle = null;
   let observer = null;
   let scanTimer = null;
   let candidatesSeen = 0;
 
   const processed = new WeakSet();       // elements already evaluated
-  const hidden = [];                     // [{el, prevDisplay}] for undo
-  const stats = { baselineHidden: 0, aiHidden: 0, aiChecked: 0 };
+  // Every hidden element, with why: record = { reason: 'ai'|'manual',
+  // tag, idAttr, classes, width, height, text, selector?, confidence?, source? }
+  const hidden = [];                     // [{el, prevDisplay, record}]
+  const stats = { baselineHidden: 0, aiHidden: 0, aiChecked: 0, manualHidden: 0 };
 
   // --- Utilities -----------------------------------------------------------
 
@@ -99,30 +106,52 @@
     });
   }
 
-  function hideElement(el) {
+  function describe(el) {
+    const rect = el.getBoundingClientRect();
+    return {
+      tag: el.tagName.toLowerCase(),
+      idAttr: el.id || '',
+      classes: (typeof el.className === 'string' ? el.className : '').slice(0, 120),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+      text: (el.innerText || el.getAttribute('src') || '').replace(/\s+/g, ' ').trim().slice(0, 80),
+    };
+  }
+
+  function hideElement(el, record) {
     if (el.dataset.bbHidden) return false;
-    hidden.push({ el, prevDisplay: el.style.getPropertyValue('display') });
+    hidden.push({ el, prevDisplay: el.style.getPropertyValue('display'), record });
     el.style.setProperty('display', 'none', 'important');
     el.dataset.bbHidden = '1';
     return true;
   }
 
-  function unhideAll() {
-    for (const { el, prevDisplay } of hidden) {
-      try {
-        if (prevDisplay) el.style.setProperty('display', prevDisplay);
-        else el.style.removeProperty('display');
-        delete el.dataset.bbHidden;
-      } catch { /* element gone */ }
+  function unhideEntry(entry) {
+    try {
+      if (entry.prevDisplay) entry.el.style.setProperty('display', entry.prevDisplay);
+      else entry.el.style.removeProperty('display');
+      delete entry.el.dataset.bbHidden;
+    } catch { /* element gone */ }
+  }
+
+  function unhideWhere(pred) {
+    for (let i = hidden.length - 1; i >= 0; i--) {
+      if (pred(hidden[i], i)) {
+        unhideEntry(hidden[i]);
+        hidden.splice(i, 1);
+      }
     }
-    hidden.length = 0;
   }
 
   function reportStats() {
+    stats.manualHidden = hidden.filter((h) => h.record.reason === 'manual').length;
     send({
       type: 'page-stats',
       host: PAGE_HOST,
-      stats: { ...stats, cosmeticHidden: stats.baselineHidden + stats.aiHidden },
+      stats: {
+        ...stats,
+        cosmeticHidden: stats.baselineHidden + stats.aiHidden + stats.manualHidden,
+      },
     });
   }
 
@@ -142,11 +171,197 @@
     baselineStyle = null;
   }
 
-  function countBaselineHits() {
+  function baselineHits() {
     try {
-      stats.baselineHidden = document.querySelectorAll(BASELINE_SELECTORS.join(','))
-        .length;
-    } catch { /* selector error — shouldn't happen */ }
+      return [...document.querySelectorAll(BASELINE_SELECTORS.join(','))];
+    } catch {
+      return [];
+    }
+  }
+
+  // --- Manual rules (element picker persistence) -----------------------------
+
+  function applyManualRules() {
+    for (const selector of manualSelectors) {
+      let nodes;
+      try {
+        nodes = document.querySelectorAll(selector);
+      } catch {
+        continue; // bad selector — ignore
+      }
+      for (const el of nodes) {
+        if (el === document.body || el === document.documentElement) continue;
+        if (hideElement(el, { reason: 'manual', selector, ...describe(el) })) {
+          processed.add(el);
+        }
+      }
+    }
+  }
+
+  function removeManualSelector(selector) {
+    manualSelectors = manualSelectors.filter((s) => s !== selector);
+    unhideWhere((h) => h.record.reason === 'manual' && h.record.selector === selector);
+    reportStats();
+  }
+
+  // Robust-ish CSS path for a picked element: unique id anchor if possible,
+  // then a unique class combo, then a structural nth-of-type path.
+  function cssPath(el) {
+    if (el.id) {
+      const sel = '#' + CSS.escape(el.id);
+      if (document.querySelectorAll(sel).length === 1) return sel;
+    }
+    const classes = [...(el.classList || [])].slice(0, 3);
+    if (classes.length) {
+      const sel = el.tagName.toLowerCase() + classes.map((c) => '.' + CSS.escape(c)).join('');
+      try {
+        if (document.querySelectorAll(sel).length === 1) return sel;
+      } catch { /* fall through */ }
+    }
+    const parts = [];
+    let node = el;
+    while (node && node.nodeType === 1) {
+      const tag = node.tagName.toLowerCase();
+      if (tag === 'html' || tag === 'body') {
+        parts.unshift(tag);
+        break;
+      }
+      if (node.id && document.querySelectorAll('#' + CSS.escape(node.id)).length === 1) {
+        parts.unshift('#' + CSS.escape(node.id));
+        break;
+      }
+      const parent = node.parentElement;
+      let part = tag;
+      if (parent) {
+        const same = [...parent.children].filter((c) => c.tagName === node.tagName);
+        if (same.length > 1) part += `:nth-of-type(${same.indexOf(node) + 1})`;
+      }
+      parts.unshift(part);
+      node = parent;
+    }
+    return parts.join(' > ');
+  }
+
+  // --- Element picker ---------------------------------------------------------
+
+  let picker = null;
+
+  function startPicker() {
+    if (picker) return;
+    const Z = 2147483647;
+    const box = document.createElement('div');
+    box.setAttribute('style',
+      `position:fixed;z-index:${Z};pointer-events:none;display:none;` +
+      'background:rgba(79,70,229,0.22);outline:2px solid #4f46e5;border-radius:2px;');
+    const tip = document.createElement('div');
+    tip.setAttribute('style',
+      `position:fixed;z-index:${Z};pointer-events:none;top:12px;left:50%;transform:translateX(-50%);` +
+      'background:#111827;color:#f9fafb;font:12px/1.4 system-ui,sans-serif;' +
+      'padding:8px 14px;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.35);' +
+      'max-width:90vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;');
+    document.documentElement.append(box, tip);
+
+    let current = null;
+    const stack = [];
+    let lastXY = null;
+
+    const label = (el) => {
+      if (!el) return '';
+      let s = el.tagName.toLowerCase();
+      if (el.id) s += '#' + el.id;
+      else if (typeof el.className === 'string' && el.className.trim()) {
+        s += '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.');
+      }
+      return s;
+    };
+
+    const position = () => {
+      if (!current) { box.style.display = 'none'; return; }
+      const r = current.getBoundingClientRect();
+      box.style.display = 'block';
+      box.style.left = r.left + 'px';
+      box.style.top = r.top + 'px';
+      box.style.width = r.width + 'px';
+      box.style.height = r.height + 'px';
+      tip.textContent =
+        `Hide ${label(current)} — click to confirm · ↑ wider · ↓ narrower · Esc to cancel`;
+    };
+
+    const pickable = (el) =>
+      el && el !== box && el !== tip && el !== document.body &&
+      el !== document.documentElement && el.nodeType === 1;
+
+    const onMove = (e) => {
+      lastXY = [e.clientX, e.clientY];
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      if (pickable(el) && el !== current) {
+        current = el;
+        stack.length = 0;
+      }
+      position();
+    };
+    const onScroll = () => {
+      if (!lastXY) return position();
+      const el = document.elementFromPoint(lastXY[0], lastXY[1]);
+      if (pickable(el) && el !== current) { current = el; stack.length = 0; }
+      position();
+    };
+    const swallow = (e) => { e.preventDefault(); e.stopImmediatePropagation(); };
+    const onClick = (e) => {
+      swallow(e);
+      const el = current;
+      stopPicker();
+      if (el) pickElement(el);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') { swallow(e); stopPicker(); return; }
+      if (e.key === 'ArrowUp') {
+        swallow(e);
+        const p = current?.parentElement;
+        if (p && p !== document.body && p !== document.documentElement) {
+          stack.push(current);
+          current = p;
+          position();
+        }
+      } else if (e.key === 'ArrowDown') {
+        swallow(e);
+        if (stack.length) { current = stack.pop(); position(); }
+      }
+    };
+
+    document.addEventListener('mousemove', onMove, true);
+    document.addEventListener('scroll', onScroll, true);
+    document.addEventListener('click', onClick, true);
+    document.addEventListener('mousedown', swallow, true);
+    document.addEventListener('mouseup', swallow, true);
+    document.addEventListener('keydown', onKey, true);
+
+    tip.textContent = 'Move the mouse and click the element you want to hide · Esc to cancel';
+
+    picker = () => {
+      document.removeEventListener('mousemove', onMove, true);
+      document.removeEventListener('scroll', onScroll, true);
+      document.removeEventListener('click', onClick, true);
+      document.removeEventListener('mousedown', swallow, true);
+      document.removeEventListener('mouseup', swallow, true);
+      document.removeEventListener('keydown', onKey, true);
+      box.remove();
+      tip.remove();
+    };
+  }
+
+  function stopPicker() {
+    picker?.();
+    picker = null;
+  }
+
+  async function pickElement(el) {
+    const selector = cssPath(el);
+    const sample = describe(el); // capture size/text before hiding zeroes the rect
+    if (!manualSelectors.includes(selector)) manualSelectors.push(selector);
+    hideElement(el, { reason: 'manual', selector, ...sample });
+    reportStats();
+    await send({ type: 'manual-add', host: PAGE_HOST, selector, sample });
   }
 
   // --- Tier 2: candidate discovery & scoring --------------------------------
@@ -262,18 +477,33 @@
     if (!res?.verdicts || !active) return;
     const t = res.threshold ?? threshold;
     let changed = false;
-    for (const { key, el } of items) {
+    for (const { key, el, features } of items) {
       const v = res.verdicts[key];
-      if (v?.isAd && v.confidence >= t && hideElement(el)) {
-        stats.aiHidden++;
-        changed = true;
+      if (v?.isAd && v.confidence >= t) {
+        const record = {
+          reason: 'ai',
+          confidence: v.confidence,
+          source: v.source,
+          ...describe(el),
+          // describe() reads a zero rect once hidden; keep scan-time size
+          width: features.width,
+          height: features.height,
+        };
+        if (hideElement(el, record)) {
+          stats.aiHidden++;
+          changed = true;
+        }
       }
     }
     if (changed || items.length) reportStats();
   }
 
   function scan(root = document) {
-    if (!active || candidatesSeen >= MAX_PER_PAGE) return;
+    applyManualRules();
+    if (!active || candidatesSeen >= MAX_PER_PAGE) {
+      reportStats();
+      return;
+    }
     const batch = [];
     for (const el of collectCandidates(root)) {
       processed.add(el);
@@ -285,13 +515,14 @@
       candidatesSeen++;
       if (batch.length >= MAX_PER_SCAN || candidatesSeen >= MAX_PER_PAGE) break;
     }
-    countBaselineHits();
+    stats.baselineHidden = baselineHits().length;
     if (batch.length) classify(batch);
     else reportStats();
   }
 
   function scheduleScan() {
-    if (scanTimer || !active) return;
+    if (scanTimer) return;
+    if (!active && !manualSelectors.length) return;
     scanTimer = setTimeout(() => {
       scanTimer = null;
       scan();
@@ -316,41 +547,79 @@
     observer = null;
   }
 
+  function syncObserver() {
+    if (active || manualSelectors.length) startObserver();
+    else stopObserver();
+  }
+
+  // --- Details for the popup --------------------------------------------------
+
+  function collectDetails() {
+    const elements = hidden.map((h, index) => ({ index, ...h.record }));
+    const baseline = baselineHits().slice(0, 50).map((el) => ({
+      index: -1,
+      reason: 'baseline',
+      ...describe(el),
+    }));
+    return { elements: [...elements, ...baseline], stats, active };
+  }
+
   // --- Lifecycle -------------------------------------------------------------
 
   function activate() {
     if (active) return;
     active = true;
     injectBaseline();
-    const onReady = () => {
-      scan();
-      startObserver();
-      // Late-loading ad tech: a couple of follow-up sweeps, then MO only.
-      setTimeout(() => scan(), 2500);
-      setTimeout(() => scan(), 7000);
-    };
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', onReady, { once: true });
-    } else {
-      onReady();
-    }
+    scheduleScan();
+    syncObserver();
+    // Late-loading ad tech: a couple of follow-up sweeps, then MO only.
+    setTimeout(() => { if (active) scan(); }, 2500);
+    setTimeout(() => { if (active) scan(); }, 7000);
   }
 
   function deactivate() {
     active = false;
-    stopObserver();
-    if (scanTimer) { clearTimeout(scanTimer); scanTimer = null; }
     removeBaseline();
-    unhideAll();
+    // Manual (user-picked) hides survive the protection toggle.
+    unhideWhere((h) => h.record.reason !== 'manual');
     stats.baselineHidden = stats.aiHidden = stats.aiChecked = 0;
+    syncObserver();
     reportStats();
   }
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-    if (msg?.type === 'bb-set-active') {
-      if (msg.active) activate();
-      else deactivate();
-      sendResponse({ ok: true });
+    switch (msg?.type) {
+      case 'bb-set-active':
+        if (msg.active) activate();
+        else deactivate();
+        sendResponse({ ok: true });
+        break;
+      case 'bb-start-picker':
+        startPicker();
+        sendResponse({ ok: true });
+        break;
+      case 'bb-get-details':
+        sendResponse(collectDetails());
+        break;
+      case 'bb-unhide': {
+        const entry = hidden[msg.index];
+        if (entry) {
+          if (entry.record.reason === 'ai') stats.aiHidden = Math.max(0, stats.aiHidden - 1);
+          unhideEntry(entry);
+          // Don't re-hide it on the next scan this page view.
+          processed.add(entry.el);
+          hidden.splice(msg.index, 1);
+          reportStats();
+        }
+        sendResponse({ ok: true });
+        break;
+      }
+      case 'bb-remove-manual':
+        removeManualSelector(msg.selector);
+        sendResponse({ ok: true });
+        break;
+      default:
+        return false;
     }
     return false;
   });
@@ -358,6 +627,17 @@
   send({ type: 'get-config', host: PAGE_HOST }).then((cfg) => {
     if (!cfg || cfg.error) return;
     threshold = cfg.threshold ?? threshold;
-    if (cfg.enabled && !cfg.allowlisted) activate();
+    manualSelectors = cfg.manualSelectors ?? [];
+    if (cfg.enabled && !cfg.allowlisted) {
+      activate();
+    } else if (manualSelectors.length) {
+      // Protection is off here, but user-picked hides still apply.
+      const applyNow = () => { applyManualRules(); syncObserver(); reportStats(); };
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', applyNow, { once: true });
+      } else {
+        applyNow();
+      }
+    }
   });
 })();

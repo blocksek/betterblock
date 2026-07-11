@@ -54,6 +54,42 @@ async function renderLearned() {
   }
 }
 
+async function renderManual() {
+  const { rules = {} } = (await send({ type: 'get-manual' })) ?? {};
+  const box = $('manual-groups');
+  box.textContent = '';
+  const hosts = Object.keys(rules).sort();
+  $('manual-empty').style.display = hosts.length ? 'none' : 'block';
+  for (const host of hosts) {
+    const h = document.createElement('h3');
+    h.textContent = host;
+    h.style.cssText = 'font-size:12px;margin:10px 0 4px';
+    const ul = document.createElement('ul');
+    ul.className = 'pill-list';
+    for (const rule of rules[host]) {
+      const li = document.createElement('li');
+      const sample = rule.sample;
+      const label = sample
+        ? (sample.tag + (sample.idAttr ? '#' + sample.idAttr : '') +
+           (sample.text ? ` — “${sample.text.slice(0, 40)}”` : ''))
+        : rule.selector;
+      li.append(label.slice(0, 60));
+      li.title = rule.selector;
+      const x = document.createElement('button');
+      x.className = 'x';
+      x.textContent = '×';
+      x.title = 'Stop hiding this element';
+      x.addEventListener('click', async () => {
+        await send({ type: 'manual-remove', host, selector: rule.selector });
+        renderManual();
+      });
+      li.append(x);
+      ul.append(li);
+    }
+    box.append(h, ul);
+  }
+}
+
 async function save(patch) {
   const res = await send({ type: 'save-settings', patch });
   if (res?.settings) settings = res.settings;
@@ -68,6 +104,7 @@ async function init() {
   $('learn-rules').checked = settings.learnNetworkRules;
   renderAllowlist();
   renderLearned();
+  renderManual();
 
   $('threshold').addEventListener('input', () => {
     $('threshold-value').textContent = Number($('threshold').value).toFixed(2);

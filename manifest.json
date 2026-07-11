@@ -6,9 +6,9 @@
   "minimum_chrome_version": "138",
   "permissions": [
     "declarativeNetRequest",
-    "declarativeNetRequestFeedback",
     "storage",
-    "tabs"
+    "tabs",
+    "webRequest"
   ],
   "host_permissions": ["<all_urls>"],
   "background": {

@@ -21,14 +21,23 @@
   </section>
 
   <section class="counts">
-    <div class="count">
+    <button class="count" id="net-card" title="Click to see which requests were blocked">
       <div class="num" id="net-count">–</div>
-      <div class="label">requests blocked</div>
-    </div>
-    <div class="count">
+      <div class="label">requests blocked ▾</div>
+    </button>
+    <button class="count" id="el-card" title="Click to see which elements were hidden">
       <div class="num" id="el-count">–</div>
-      <div class="label">elements hidden</div>
-    </div>
+      <div class="label">elements hidden ▾</div>
+    </button>
+  </section>
+
+  <section id="details" class="hidden">
+    <div id="details-empty" class="sub hidden">Nothing here yet.</div>
+    <ul id="details-list"></ul>
+  </section>
+
+  <section class="row">
+    <button id="picker-btn" class="wide">⌖ Hide an element on this page…</button>
   </section>
 
   <section class="row toggle-row">
