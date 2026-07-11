@@ -1,0 +1,100 @@
+:root {
+  --indigo: #4f46e5;
+  --bg: #f3f4f6;
+  --card: #ffffff;
+  --fg: #111827;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b1120;
+    --card: #111827;
+    --fg: #f3f4f6;
+    --muted: #9ca3af;
+    --border: #374151;
+  }
+}
+
+* { box-sizing: border-box; margin: 0; }
+
+body {
+  font: 14px/1.5 system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  padding: 32px 16px;
+}
+
+main { max-width: 640px; margin: 0 auto; display: grid; gap: 16px; }
+
+header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+h1 { font-size: 20px; }
+h2 { font-size: 14px; margin-bottom: 8px; }
+.sub, .hint { color: var(--muted); font-size: 12px; }
+.hint { display: block; margin-top: 2px; font-weight: 400; }
+
+section {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.field { margin-bottom: 12px; }
+.field:last-child { margin-bottom: 0; }
+.field label { font-weight: 550; }
+input[type="range"] { width: 100%; margin-top: 6px; accent-color: var(--indigo); }
+input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--indigo); }
+
+.row { display: flex; align-items: center; gap: 8px; }
+.row.gap { gap: 12px; }
+.grow { flex: 1; }
+
+input[type="text"] {
+  flex: 1;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+
+button {
+  background: var(--indigo);
+  color: #fff;
+  border: 0;
+  border-radius: 6px;
+  padding: 7px 14px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+button:hover { filter: brightness(1.1); }
+button.subtle { background: transparent; color: var(--indigo); border: 1px solid var(--border); }
+
+.pill-list { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; padding: 0; }
+.pill-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 6px 3px 12px;
+  font-size: 12px;
+}
+.pill-list .x {
+  background: transparent;
+  color: var(--muted);
+  padding: 0 6px;
+  font-weight: 700;
+}
+.pill-list .x:hover { color: #dc2626; }
+
+.privacy p { font-size: 13px; color: var(--muted); }
+.privacy strong { color: var(--fg); }

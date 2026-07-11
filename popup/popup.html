@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <img src="../icons/icon32.png" alt="" width="20" height="20">
+    <h1>BetterBlock</h1>
+    <span id="privacy-badge" title="All processing happens on this device. BetterBlock makes zero network requests.">100% local</span>
+  </header>
+
+  <section id="ai-status" class="row">
+    <span class="dot" id="ai-dot"></span>
+    <div class="grow">
+      <div id="ai-label">Checking on-device AI…</div>
+      <div class="sub" id="ai-sub"></div>
+    </div>
+    <button id="download-btn" class="hidden">Enable AI</button>
+  </section>
+
+  <section class="counts">
+    <div class="count">
+      <div class="num" id="net-count">–</div>
+      <div class="label">requests blocked</div>
+    </div>
+    <div class="count">
+      <div class="num" id="el-count">–</div>
+      <div class="label">elements hidden</div>
+    </div>
+  </section>
+
+  <section class="row toggle-row">
+    <div class="grow">
+      <div>Protection on <span id="site-host">this site</span></div>
+    </div>
+    <label class="switch">
+      <input type="checkbox" id="site-toggle">
+      <span class="slider"></span>
+    </label>
+  </section>
+
+  <section class="row toggle-row">
+    <div class="grow"><div>Protection everywhere</div></div>
+    <label class="switch">
+      <input type="checkbox" id="global-toggle">
+      <span class="slider"></span>
+    </label>
+  </section>
+
+  <footer>
+    <a href="#" id="options-link">Settings</a>
+    <span id="learned-note"></span>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>

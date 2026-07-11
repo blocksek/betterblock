@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>BetterBlock Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main>
+    <header>
+      <img src="../icons/icon48.png" alt="" width="32" height="32">
+      <div>
+        <h1>BetterBlock Settings</h1>
+        <p class="sub">On-device AI ad blocking — nothing ever leaves your machine.</p>
+      </div>
+    </header>
+
+    <section>
+      <h2>AI classification</h2>
+      <div class="field">
+        <label for="threshold">Confidence required to hide an element:
+          <strong id="threshold-value">0.70</strong></label>
+        <input type="range" id="threshold" min="0.5" max="0.95" step="0.05">
+        <p class="hint">Lower = blocks more aggressively, higher = fewer false positives.</p>
+      </div>
+      <div class="field row">
+        <label for="learn-rules" class="grow">
+          Learn network block rules from AI verdicts
+          <span class="hint">When the AI is highly confident an iframe host serves ads,
+          block that host at the network level on future page loads.</span>
+        </label>
+        <input type="checkbox" id="learn-rules">
+      </div>
+    </section>
+
+    <section>
+      <h2>Allowlisted sites</h2>
+      <p class="hint">BetterBlock is fully disabled on these hostnames.</p>
+      <ul id="allowlist" class="pill-list"></ul>
+      <div class="row">
+        <input type="text" id="allow-input" placeholder="example.com" spellcheck="false">
+        <button id="allow-add">Add</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>AI-learned block rules</h2>
+      <p class="hint">Domains the AI concluded serve ads. Requests to them are blocked.
+        Remove any that break a site you use.</p>
+      <ul id="learned-list" class="pill-list"></ul>
+      <p id="learned-empty" class="hint">Nothing learned yet.</p>
+    </section>
+
+    <section>
+      <h2>Data</h2>
+      <p class="hint">All data below is stored locally in your browser profile.</p>
+      <div class="row gap">
+        <button id="clear-cache">Clear verdict cache</button>
+        <span id="clear-done" class="hint"></span>
+      </div>
+    </section>
+
+    <section class="privacy">
+      <h2>Privacy</h2>
+      <p>BetterBlock makes <strong>zero network requests</strong>. Ad classification runs
+      on-device via Chrome's built-in Gemini Nano (or a local heuristic when the model
+      isn't available). Page data never leaves this computer, and there is no telemetry,
+      no analytics, and no remote filter-list fetching.</p>
+    </section>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>

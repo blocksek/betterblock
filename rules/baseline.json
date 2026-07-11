@@ -1,0 +1,123 @@
+[
+  {
+    "id": 1,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "requestDomains": [
+        "doubleclick.net",
+        "googlesyndication.com",
+        "googleadservices.com",
+        "adservice.google.com",
+        "google-analytics.com",
+        "googletagservices.com"
+      ],
+      "domainType": "thirdParty",
+      "resourceTypes": ["script", "sub_frame", "image", "xmlhttprequest", "ping", "other"]
+    }
+  },
+  {
+    "id": 2,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "requestDomains": [
+        "adnxs.com",
+        "adsrvr.org",
+        "criteo.com",
+        "criteo.net",
+        "rubiconproject.com",
+        "pubmatic.com",
+        "openx.net",
+        "casalemedia.com",
+        "indexexchange.com",
+        "smartadserver.com",
+        "yieldmo.com",
+        "sharethrough.com",
+        "33across.com",
+        "gumgum.com",
+        "sovrn.com",
+        "lijit.com",
+        "media.net",
+        "adform.net",
+        "teads.tv",
+        "amazon-adsystem.com"
+      ],
+      "domainType": "thirdParty",
+      "resourceTypes": ["script", "sub_frame", "image", "xmlhttprequest", "ping", "other"]
+    }
+  },
+  {
+    "id": 3,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "requestDomains": [
+        "taboola.com",
+        "outbrain.com",
+        "revcontent.com",
+        "mgid.com",
+        "zergnet.com",
+        "content-ad.net"
+      ],
+      "domainType": "thirdParty",
+      "resourceTypes": ["script", "sub_frame", "image", "xmlhttprequest", "ping", "other"]
+    }
+  },
+  {
+    "id": 4,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "requestDomains": [
+        "scorecardresearch.com",
+        "quantserve.com",
+        "chartbeat.com",
+        "hotjar.com",
+        "mouseflow.com",
+        "fullstory.com",
+        "crazyegg.com",
+        "clarity.ms",
+        "branch.io",
+        "amplitude.com",
+        "mixpanel.com",
+        "segment.io",
+        "bluekai.com",
+        "krxd.net",
+        "demdex.net",
+        "agkn.com",
+        "mathtag.com",
+        "rlcdn.com",
+        "tapad.com",
+        "bidswitch.net"
+      ],
+      "domainType": "thirdParty",
+      "resourceTypes": ["script", "image", "xmlhttprequest", "ping", "other"]
+    }
+  },
+  {
+    "id": 5,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "requestDomains": [
+        "moatads.com",
+        "doubleverify.com",
+        "adsafeprotected.com",
+        "serving-sys.com",
+        "innovid.com",
+        "springserve.com",
+        "spotxchange.com",
+        "spotx.tv",
+        "tremorhub.com",
+        "undertone.com",
+        "zedo.com",
+        "adroll.com",
+        "perfectaudience.com",
+        "quantcast.com"
+      ],
+      "domainType": "thirdParty",
+      "resourceTypes": ["script", "sub_frame", "image", "xmlhttprequest", "ping", "media", "other"]
+    }
+  }
+]
