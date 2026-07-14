@@ -87,6 +87,15 @@ const PAGE = `<!DOCTYPE html>
   </div>
   <!-- Third-party ad iframe -->
   <iframe id="t3-frame" src="http://ads.thirdparty-adserver.test:1/banner" style="width:300px;height:250px"></iframe>
+  <!-- Gmail-style rows: minified class names collide with ad keywords but
+       these are real content (many identical siblings, long text, no links) -->
+  <div id="thread-list">
+    <div class="adf ads" style="width:1000px;height:40px">Re: Quarterly report — Hi team, attaching the latest numbers for review. Let me know if the totals in sheet two look right to everyone before we send it on to finance for approval.</div>
+    <div class="adf ads" style="width:1000px;height:40px">Dinner on Saturday? — We were thinking that new noodle place around the corner at seven, does that work for you two? Alex says they take reservations only until six.</div>
+    <div class="adf ads" style="width:1000px;height:40px">Your package has shipped — Order 4821 left the warehouse today and should arrive within three to five business days according to the carrier tracking page linked in your account.</div>
+    <div class="adf ads" style="width:1000px;height:40px">Book club notes — This month we are reading chapters four through nine; Priya volunteered to host and will send the address separately later this week.</div>
+    <div class="adf ads" style="width:1000px;height:40px">Weekend photos — Finally uploaded the album from the hike, the ridge shots came out great. The shared link should work for everyone without signing in.</div>
+  </div>
   <!-- Normal nav element that must NOT be hidden automatically -->
   <nav id="site-nav" class="header-navigation" style="width:600px;height:50px;position:relative"><a href="/about">About</a></nav>
 </body></html>`;
@@ -138,6 +147,10 @@ async function main() {
   check('tier3 ad iframe hidden', (await vis('t3-frame')) === false);
   check('real content visible', (await vis('real-content')) === true);
   check('nav visible', (await vis('site-nav')) === true);
+  const rowsVisible = await page.evaluate(() =>
+    [...document.querySelectorAll('#thread-list > div')]
+      .every((el) => getComputedStyle(el).display !== 'none'));
+  check('gmail-style .ads rows NOT hidden (false-positive guard)', rowsVisible);
 
   // Use the popup page as a messaging context (it can talk to SW and tabs).
   const popup = await ctx.newPage();
@@ -177,10 +190,15 @@ async function main() {
   console.log('  info: elements =', JSON.stringify(els.map((e) => ({
     i: e.index, id: e.idAttr, tag: e.tag, reason: e.reason, conf: e.confidence }))));
 
-  // Unhide the banner for this page view.
+  // Unhide the banner — this is a user veto the cache must remember.
   const banner = els.find((e) => e.idAttr === 'sponsored-ad-banner');
   await tabMsg({ type: 'bb-unhide', index: banner.index });
   check('unhide restores the banner', (await vis('sponsored-ad-banner')) === true);
+  await page.waitForTimeout(2500); // let the veto reach the cache write
+  await page.reload();
+  await page.waitForTimeout(3000);
+  check('unhide veto persists across reload', (await vis('sponsored-ad-banner')) === true);
+  check('other AI hides unaffected by veto', (await vis('t3-frame')) === false);
 
   // --- Feature 2: element picker -------------------------------------------
   await tabMsg({ type: 'bb-start-picker' });

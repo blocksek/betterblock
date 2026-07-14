@@ -34,6 +34,9 @@ const DEFAULT_SETTINGS = {
 
 const VERDICT_CACHE_KEY = 'verdictCache';
 const VERDICT_CACHE_MAX = 5000;
+// Bump when classification logic changes enough that old verdicts are
+// suspect (e.g. the Gmail .ads false-positive fix) — flushes the cache.
+const CACHE_VERSION = 2;
 const LEARNED_KEY = 'learnedDomains';
 const LEARNED_RULE_ID_BASE = 100000;
 const LEARNED_MAX = 300;
@@ -436,6 +439,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       await removeLearnedDomain(msg.host);
       return { ok: true };
     },
+    'user-not-ad': async () => {
+      // The user unhid an AI-hidden element: permanent veto for this shape.
+      if (!msg.key) return { ok: false };
+      const cache = await getVerdictCache();
+      cache.set(msg.key, { isAd: false, confidence: 1, source: 'user' });
+      scheduleCacheWrite();
+      return { ok: true };
+    },
     'clear-cache': async () => {
       verdictCache = new Map();
       await chrome.storage.local.remove(VERDICT_CACHE_KEY);
@@ -466,6 +477,13 @@ chrome.runtime.onInstalled.addListener(async () => {
   const settings = await getSettings();
   await syncAllowlistRules(settings.allowlist);
   await syncPermissionRules(settings);
+  // Flush verdicts cached by older classification logic.
+  const { cacheVersion } = await chrome.storage.local.get('cacheVersion');
+  if (cacheVersion !== CACHE_VERSION) {
+    verdictCache = new Map();
+    await chrome.storage.local.remove(VERDICT_CACHE_KEY);
+    await chrome.storage.local.set({ cacheVersion: CACHE_VERSION });
+  }
 });
 
 chrome.action.setBadgeBackgroundColor({ color: '#4f46e5' });

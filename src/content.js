@@ -53,6 +53,19 @@
     '200x200', '234x60', '180x150', '125x125', '300x1050', '930x180',
   ]);
 
+  // Web apps whose minified class names collide with ad keywords (Gmail
+  // literally uses .ads/.adf/.adn on email rows) and where hiding real
+  // content is costly. The AI/heuristic cosmetic tier is disabled here;
+  // network blocking, baseline CSS, cookie hiding and manual picks still run.
+  const FRAGILE_HOSTS = new Set([
+    'mail.google.com', 'docs.google.com', 'drive.google.com',
+    'calendar.google.com', 'contacts.google.com', 'chat.google.com',
+    'outlook.live.com', 'outlook.office.com', 'outlook.office365.com',
+    'mail.yahoo.com', 'mail.proton.me', 'mail.zoho.com', 'app.fastmail.com',
+    'web.whatsapp.com', 'web.telegram.org', 'app.slack.com',
+    'discord.com', 'www.notion.so', 'www.figma.com',
+  ]);
+
   // --- Cookie-consent prompt vocabulary --------------------------------------
   // Container selectors of well-known consent-management platforms, plus
   // generic wording tests for everything else. `shadow: true` means the CMP
@@ -168,6 +181,7 @@
   }
 
   function reportStats() {
+    stats.aiHidden = hidden.filter((h) => h.record.reason === 'ai').length;
     stats.manualHidden = hidden.filter((h) => h.record.reason === 'manual').length;
     const cookieHidden = hidden.filter((h) => h.record.reason === 'cookie').length;
     stats.cookiesHandled = cookieHidden;
@@ -534,25 +548,44 @@
 
   // --- Tier 2: candidate discovery & scoring --------------------------------
 
+  // Two signal classes: `name` (ad-ish ids/classes/attributes — cheap for a
+  // site to trip accidentally: Gmail's minified .ads class hits this) and
+  // `evidence` (behavioral: ad-network hosts, banner geometry, sponsored
+  // labels, third-party links). Name signals alone never condemn an element
+  // that looks like first-party content.
   function scoreElement(el, f) {
-    let score = 0;
+    let name = 0;
+    let evidence = 0;
     const idClass = `${f.idAttr} ${f.classes}`;
-    if (STRONG_AD_RE.test(idClass)) score += 3;
-    if (WEAK_AD_RE.test(idClass)) score += 2;
-    if (f.tag === 'iframe' && f.thirdParty) score += 2;
-    if (f.srcHost && AD_HOST_RE.test(f.srcHost)) score += 4;
-    if (IAB_SIZES.has(`${f.width}x${f.height}`)) score += 1.5;
-    if (AD_TEXT_RE.test(f.text)) score += 2.5;
+    if (STRONG_AD_RE.test(idClass)) name += 3;
+    if (WEAK_AD_RE.test(idClass)) name += 2;
+    if (el.hasAttribute('data-ad') || el.hasAttribute('data-ad-client') ||
+        el.hasAttribute('data-adunit') || el.hasAttribute('data-ad-unit')) name += 3;
+
+    const labeled = AD_TEXT_RE.test(f.text);
+    if (f.tag === 'iframe' && f.thirdParty) evidence += 2;
+    if (f.srcHost && AD_HOST_RE.test(f.srcHost)) evidence += 4;
+    if (IAB_SIZES.has(`${f.width}x${f.height}`)) evidence += 1.5;
+    if (labeled) evidence += 2.5;
     if ((f.position === 'fixed' || f.position === 'sticky') && f.zIndex >= 1000) {
       const vw = innerWidth || 1;
       const vh = innerHeight || 1;
       const coverage = (f.width * f.height) / (vw * vh);
-      if (coverage > 0.03 && coverage < 0.5) score += 2; // floating banner, not a modal
+      if (coverage > 0.03 && coverage < 0.5) evidence += 2; // floating banner, not a modal
     }
-    if (el.hasAttribute('data-ad') || el.hasAttribute('data-ad-client') ||
-        el.hasAttribute('data-adunit') || el.hasAttribute('data-ad-unit')) score += 3;
-    if (f.linkHosts.length && f.linkHosts.every(isThirdParty) && f.text.length < 300) score += 1;
-    return score;
+    if (f.linkHosts.length && f.linkHosts.every(isThirdParty) && f.text.length < 300) {
+      evidence += 1;
+    }
+
+    // First-party-content counterweights: lots of text, or one row among
+    // many structurally identical siblings (email threads, feed items).
+    let penalty = 0;
+    if (f.text.length > 350 && !labeled) penalty += 2;
+    if (f.similarSiblings >= 4 && !labeled) penalty += 2;
+    // A name match with zero behavioral evidence on content-shaped elements
+    // is exactly the Gmail failure mode — not even worth asking the model.
+    if (evidence === 0 && penalty > 0) return 0;
+    return Math.max(0, name + evidence - penalty);
   }
 
   function extractFeatures(el) {
@@ -567,7 +600,16 @@
       if (linkHosts.length >= 4) break;
     }
     const text = (el.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+    let similarSiblings = 0;
+    if (el.parentElement) {
+      for (const c of el.parentElement.children) {
+        if (c !== el && c.tagName === el.tagName && c.className === el.className) {
+          similarSiblings++;
+        }
+      }
+    }
     return {
+      similarSiblings,
       tag: el.tagName.toLowerCase(),
       idAttr: el.id || '',
       classes: typeof el.className === 'string' ? el.className.slice(0, 200) : '',
@@ -650,6 +692,7 @@
       if (v?.isAd && v.confidence >= t) {
         const record = {
           reason: 'ai',
+          key,
           confidence: v.confidence,
           source: v.source,
           ...describe(el),
@@ -657,10 +700,7 @@
           width: features.width,
           height: features.height,
         };
-        if (hideElement(el, record)) {
-          stats.aiHidden++;
-          changed = true;
-        }
+        if (hideElement(el, record)) changed = true;
       }
     }
     if (changed || items.length) reportStats();
@@ -669,7 +709,7 @@
   function scan(root = document) {
     applyManualRules();
     scanCookieBanners();
-    if (!active || candidatesSeen >= MAX_PER_PAGE) {
+    if (!active || candidatesSeen >= MAX_PER_PAGE || FRAGILE_HOSTS.has(PAGE_HOST)) {
       reportStats();
       return;
     }
@@ -773,11 +813,21 @@
       case 'bb-unhide': {
         const entry = hidden[msg.index];
         if (entry) {
-          if (entry.record.reason === 'ai') stats.aiHidden = Math.max(0, stats.aiHidden - 1);
-          unhideEntry(entry);
-          // Don't re-hide it on the next scan this page view.
-          processed.add(entry.el);
-          hidden.splice(msg.index, 1);
+          if (entry.record.reason === 'ai' && entry.record.key) {
+            // Unhiding an AI verdict is a correction: unhide every element
+            // of the same shape and remember it permanently in the cache.
+            const key = entry.record.key;
+            unhideWhere((h) => {
+              if (h.record.key !== key) return false;
+              processed.add(h.el);
+              return true;
+            });
+            send({ type: 'user-not-ad', key });
+          } else {
+            unhideEntry(entry);
+            processed.add(entry.el); // don't re-hide this page view
+            hidden.splice(msg.index, 1);
+          }
           reportStats();
         }
         sendResponse({ ok: true });

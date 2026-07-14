@@ -14,7 +14,9 @@ You receive a JSON array of element records. Each record describes one DOM eleme
 tag, id, classes, width/height in px, position (static/fixed/sticky), zIndex,
 srcHost (host an iframe/img/script loads from), pageHost (the site being visited),
 thirdParty (srcHost differs from pageHost), linkHosts (hosts of links inside it),
-and a short text excerpt.
+similarSiblings (how many sibling elements share its tag and class — high values
+mean it is one row of a list: emails, feed items, search results), and a short
+text excerpt.
 
 An element IS an ad if its primary purpose is to display paid, promoted, or sponsored
 content from an advertiser: display banners, ad iframes, sponsored/promoted widgets,
@@ -22,8 +24,16 @@ content from an advertiser: display banners, ad iframes, sponsored/promoted widg
 
 An element is NOT an ad if it is: site navigation, article/media content the user came
 to see, search results, comments, cookie/consent banners, login or paywall prompts,
-or the site's own functional UI. When genuinely uncertain, prefer isAd=false with low
-confidence — never break a page to block a maybe-ad.
+or the site's own functional UI.
+
+IMPORTANT: id/class names are NOT sufficient evidence. Many web apps (mail clients,
+dashboards) use short auto-generated class names that coincidentally contain "ad" or
+"ads" — Gmail's email rows literally use class "ads". Only classify as an ad when the
+name is corroborated by behavior: an ad-network srcHost, a standard banner size, a
+"Sponsored"/"Advertisement" label in the text, or promotional third-party links.
+An element with high similarSiblings and ordinary conversational text is almost
+certainly user content, not an ad. When genuinely uncertain, prefer isAd=false with
+low confidence — never break a page to block a maybe-ad.
 
 Respond ONLY with JSON that matches the requested schema: one verdict per input record,
 matching each record's "id". confidence is 0.0-1.0.`;
@@ -216,6 +226,7 @@ function sanitizeFeatures(f) {
     pageHost: trunc(f.pageHost, 100),
     thirdParty: f.thirdParty,
     linkHosts: (f.linkHosts ?? []).slice(0, 4).map((h) => trunc(h, 100)),
+    similarSiblings: f.similarSiblings ?? 0,
     text: trunc(f.text, 160),
   };
 }

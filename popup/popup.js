@@ -159,7 +159,9 @@ async function showElements() {
       } : null,
       removeTitle: e.reason === 'manual'
         ? 'Unhide and forget this rule'
-        : 'Unhide on this page view',
+        : e.reason === 'ai'
+          ? "Unhide — BetterBlock remembers this isn't an ad"
+          : 'Unhide on this page view',
     });
   }));
 }

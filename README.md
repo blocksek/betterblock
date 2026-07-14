@@ -156,6 +156,28 @@ to reuse an existing binary) then `node test/smoke.js`. It loads the unpacked
 extension into headless Chromium and drives ad blocking, the drill-down
 lists, the element picker lifecycle, and cookie-banner hiding.
 
+## False-positive protections
+
+Class names lie: Gmail's minified classes (`.ads`, `.adf`, `.adn`) sit on real
+email rows. BetterBlock defends in four layers:
+
+- **Corroboration required** — ad-ish ids/classes alone never condemn an
+  element. Candidates need behavioral evidence (ad-network `src`, IAB banner
+  size, "Sponsored" label, third-party links); elements with substantial
+  first-party text or many structurally identical siblings (email threads,
+  feed rows) are skipped outright when that evidence is absent, and the LLM
+  prompt carries the same warning plus a `similarSiblings` feature.
+- **Fragile hosts** — on webmail/productivity apps (Gmail, Outlook, Proton,
+  Yahoo/Zoho/Fastmail, Google Docs/Drive/Calendar, Slack, Discord, WhatsApp
+  Web, Telegram Web, Notion, Figma) the AI cosmetic tier is disabled
+  entirely; network blocking, baseline CSS, cookie hiding and manual picks
+  still run. The list is `FRAGILE_HOSTS` in `src/content.js`.
+- **Unhide teaches** — clicking *unhide* on an AI-hidden element unhides
+  every element of the same shape on the page and stores a permanent user
+  veto in the verdict cache, so it is never hidden again.
+- **Cache versioning** — verdicts cached by older classification logic are
+  flushed on update.
+
 ## Design notes & limitations
 
 - The LLM classifies **element descriptions**, not raw pages: tag, id/class,
