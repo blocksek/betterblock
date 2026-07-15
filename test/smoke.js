@@ -71,6 +71,23 @@ const COOKIE_ACCEPT_ONLY = `<!DOCTYPE html><html><head><title>a</title></head>
   </div>
 </body></html>`;
 
+// Served as mail.google.com via --host-resolver-rules: the AI cosmetic tier
+// must not run at all on fragile hosts, whatever the class names say.
+const GMAIL_PAGE = `<!DOCTYPE html><html><head><title>gm</title></head><body>
+  <table><tr>
+    <td id=":ad" style="width:43px;height:20px;display:block">Reply</td>
+    <td id=":ae" style="width:43px;height:20px;display:block">Forward</td>
+  </tr></table>
+  <div class="adn ads" style="width:1000px;height:426px">
+    [Applied Intuition] Availability — Hi, thanks for getting back to us about
+    scheduling. ${'The team would love to find a time that works for everyone involved. '.repeat(6)}
+  </div>
+  <div class="adn ads" style="width:1000px;height:297px">
+    Re: your order — ${'Everything shipped this morning and tracking is attached below. '.repeat(6)}
+  </div>
+  <iframe id="I__HC_94253229" src="/help-widget" style="width:300px;height:150px"></iframe>
+</body></html>`;
+
 const PAGE = `<!DOCTYPE html>
 <html><head><title>test</title></head><body>
   <h1>Article title</h1>
@@ -113,6 +130,7 @@ async function main() {
     else if (req.url === '/cookie-generic-reject') res.end(COOKIE_GENERIC_REJECT);
     else if (req.url === '/cookie-accept-only') res.end(COOKIE_ACCEPT_ONLY);
     else if (req.url === '/cookie-two-step') res.end(COOKIE_TWO_STEP);
+    else if (req.url === '/gmail') res.end(GMAIL_PAGE);
     else res.end(PAGE);
   }).listen(8917);
 
@@ -124,6 +142,7 @@ async function main() {
       args: [
         `--disable-extensions-except=${EXT}`,
         `--load-extension=${EXT}`,
+        '--host-resolver-rules=MAP mail.google.com 127.0.0.1',
         '--headless=new',
       ],
     });
@@ -313,6 +332,28 @@ async function main() {
   await msg({ type: 'toggle-site', host: 'localhost' }); // restore
   check('un-allowlisting re-blocks',
     (await perm('location', 'http://localhost:8917/')).setting === 'block');
+
+  // --- Feature 5: fragile hosts (Gmail) --------------------------------------
+  const gm = await ctx.newPage();
+  await gm.goto('http://mail.google.com:8917/gmail');
+  await gm.waitForTimeout(3500);
+  const gmail = await gm.evaluate(() => ({
+    host: location.hostname,
+    anyHidden: [...document.querySelectorAll('td, div, iframe')]
+      .some((el) => el.dataset.bbHidden),
+    bodyVisible: [...document.querySelectorAll('.adn.ads')]
+      .every((el) => getComputedStyle(el).display !== 'none'),
+    tdVisible: getComputedStyle(document.getElementById(':ad')).display !== 'none',
+  }));
+  check('gmail host reaches content script', gmail.host === 'mail.google.com');
+  check('gmail: email bodies (.adn.ads) untouched', gmail.bodyVisible);
+  check('gmail: td#:ad untouched', gmail.tdVisible);
+  check('gmail: nothing hidden at all', !gmail.anyHidden);
+  const gmStats = await popup.evaluate(() =>
+    chrome.tabs.query({ url: 'http://mail.google.com:8917/*' })
+      .then(([t]) => new Promise((r) =>
+        chrome.tabs.sendMessage(t.id, { type: 'bb-get-details' }, (res) => { void chrome.runtime.lastError; r(res ?? null); }))));
+  check('gmail: AI tier never consulted', gmStats?.stats?.aiChecked === 0);
 
   // Options page still loads clean.
   const options = await ctx.newPage();
